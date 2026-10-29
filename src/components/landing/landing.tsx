@@ -60,57 +60,62 @@ const STEPS = [
 
 export function Landing() {
   return (
-    <main className="relative isolate min-h-screen overflow-x-clip bg-[#060918] text-slate-100">
+    <main className="relative isolate min-h-screen overflow-x-clip bg-white text-slate-900">
       {/* ambient glows */}
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[900px] overflow-hidden">
-        <div className="glow-drift absolute -left-40 -top-40 h-[520px] w-[520px] rounded-full bg-indigo-600/30 blur-[120px]" />
-        <div className="glow-drift absolute -right-32 top-40 h-[480px] w-[480px] rounded-full bg-sky-500/25 blur-[120px] [animation-delay:-6s]" />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,.07)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,.07)_1px,transparent_1px)] bg-[size:56px_56px] [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_70%)]" />
+        <div className="glow-drift absolute -left-40 -top-40 h-[520px] w-[520px] rounded-full bg-indigo-300/40 blur-[120px]" />
+        <div className="glow-drift absolute -right-32 top-40 h-[480px] w-[480px] rounded-full bg-sky-300/40 blur-[120px] [animation-delay:-6s]" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(99,102,241,.07)_1px,transparent_1px),linear-gradient(90deg,rgba(99,102,241,.07)_1px,transparent_1px)] bg-[size:56px_56px] [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_70%)]" />
       </div>
 
-      <header className="sticky top-0 z-30 border-b border-white/5 bg-[#060918]/70 backdrop-blur-xl">
+      <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/75 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
           <Link href="/" aria-label="MySmartCard Campus home">
             <BrandMark />
           </Link>
-          <nav className="hidden items-center gap-7 text-sm text-slate-300 md:flex">
-            <a href="#how" className="hover:text-white">How it works</a>
-            <a href="#features" className="hover:text-white">Features</a>
-            <a href="#roles" className="hover:text-white">For colleges</a>
-            <a href="#security" className="hover:text-white">Security</a>
+          <nav className="hidden items-center gap-7 text-sm text-slate-600 md:flex">
+            <a href="#how" className="hover:text-slate-900">How it works</a>
+            <a href="#features" className="hover:text-slate-900">Features</a>
+            <a href="#roles" className="hover:text-slate-900">For colleges</a>
+            <a href="#security" className="hover:text-slate-900">Security</a>
           </nav>
-          <Link href="/login" className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-sky-100">
-            Sign in
-          </Link>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <Link href="/login?next=%2Fplatform" aria-label="Super admin sign in" className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700">
+              <KeyRound className="h-4 w-4" aria-hidden /> <span className="hidden sm:inline">Super admin</span>
+            </Link>
+            <Link href="/login" className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700">
+              Sign in
+            </Link>
+          </div>
         </div>
       </header>
 
       {/* Hero */}
       <section className="relative mx-auto grid max-w-6xl items-center gap-14 px-4 pb-20 pt-14 lg:grid-cols-[1.05fr_1fr] lg:pt-24">
         <div className="rise text-center lg:text-left">
-          <span className="inline-flex items-center gap-2 rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-xs font-medium text-sky-200">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-300" /> NFC student ID + complete campus management
+          <span className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" /> NFC student ID + complete campus management
           </span>
           <h1 className="mt-6 text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
             One tap.
             <br />
-            <span className="bg-[linear-gradient(90deg,#7dd3fc,#a5b4fc,#f0abfc)] bg-clip-text text-transparent">The whole campus.</span>
+            <span className="bg-[linear-gradient(90deg,#0284c7,#4f46e5,#c026d3)] bg-clip-text text-transparent">The whole campus.</span>
           </h1>
-          <p className="mx-auto mt-6 max-w-xl text-lg text-slate-300 lg:mx-0">
+          <p className="mx-auto mt-6 max-w-xl text-lg text-slate-600 lg:mx-0">
             Every college gets its own admin panel for students, academics, fees and more. Every student gets a smart ID card that opens their verified profile with a single tap.
           </p>
           <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row lg:justify-start">
             <Link href="/login" className="group inline-flex items-center justify-center gap-2 rounded-full bg-[linear-gradient(90deg,#0ea5e9,#6366f1)] px-6 py-3 font-semibold text-white shadow-[0_10px_40px_-10px_rgba(99,102,241,.8)] transition hover:brightness-110">
               Sign in to your college <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" aria-hidden />
             </Link>
-            <a href="#how" className="inline-flex items-center justify-center rounded-full border border-white/15 px-6 py-3 font-semibold text-slate-100 transition hover:bg-white/5">
+            <a href="#how" className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-6 py-3 font-semibold text-slate-800 transition hover:border-slate-400 hover:bg-slate-50">
               See how it works
             </a>
           </div>
-          <ul className="mx-auto mt-9 flex max-w-md flex-wrap justify-center gap-x-6 gap-y-2 text-sm text-slate-400 lg:mx-0 lg:justify-start">
+          <ul className="mx-auto mt-9 flex max-w-md flex-wrap justify-center gap-x-6 gap-y-2 text-sm text-slate-600 lg:mx-0 lg:justify-start">
             {["No app to install", "Works on any NFC phone", "Each college fully separate"].map((t) => (
               <li key={t} className="flex items-center gap-1.5">
-                <Check className="h-4 w-4 text-emerald-400" aria-hidden /> {t}
+                <Check className="h-4 w-4 text-emerald-600" aria-hidden /> {t}
               </li>
             ))}
           </ul>
@@ -118,21 +123,21 @@ export function Landing() {
 
         <div className="relative">
           <IdCard3D />
-          <div aria-hidden className="float-chip absolute -left-12 bottom-24 hidden rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm backdrop-blur-md sm:block">
-            <div className="text-xs text-slate-400">Attendance</div>
-            <div className="text-xl font-semibold text-emerald-300">92%</div>
+          <div aria-hidden className="float-chip absolute -left-12 bottom-24 hidden rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-sm shadow-xl shadow-indigo-500/10 backdrop-blur-md sm:block">
+            <div className="text-xs text-slate-500">Attendance</div>
+            <div className="text-xl font-semibold text-emerald-600">92%</div>
           </div>
-          <div aria-hidden className="float-chip absolute -right-4 -top-20 hidden rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm backdrop-blur-md [animation-delay:-3s] sm:block">
-            <div className="flex items-center gap-2 text-emerald-300">
+          <div aria-hidden className="float-chip absolute -right-4 -top-20 hidden rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-sm shadow-xl shadow-indigo-500/10 backdrop-blur-md [animation-delay:-3s] sm:block">
+            <div className="flex items-center gap-2 font-medium text-emerald-600">
               <ShieldCheck className="h-4 w-4" /> Verified student
             </div>
-            <div className="text-xs text-slate-400">Portal opened in 0.4s</div>
+            <div className="text-xs text-slate-500">Portal opened in 0.4s</div>
           </div>
         </div>
       </section>
 
       {/* Numbers */}
-      <section className="border-y border-white/5 bg-white/[0.02]">
+      <section className="border-y border-slate-200 bg-slate-50/80">
         <dl className="mx-auto grid max-w-6xl grid-cols-2 gap-6 px-4 py-10 text-center md:grid-cols-4">
           {[
             ["10", "student portal modules"],
@@ -142,8 +147,8 @@ export function Landing() {
           ].map(([v, l]) => (
             <div key={l}>
               <dt className="sr-only">{l}</dt>
-              <dd className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{v}</dd>
-              <dd className="mt-1 text-sm text-slate-400">{l}</dd>
+              <dd className="text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">{v}</dd>
+              <dd className="mt-1 text-sm text-slate-600">{l}</dd>
             </div>
           ))}
         </dl>
@@ -152,29 +157,29 @@ export function Landing() {
       {/* How it works, with the animated connector */}
       <section id="how" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-300">How it works</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600">How it works</p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">From onboarding to a tap, connected end to end</h2>
         </Reveal>
         <div className="relative mt-16">
           {/* connector: horizontal on desktop, vertical on mobile */}
           <div aria-hidden className="connector absolute left-[12.5%] right-[12.5%] top-8 hidden h-0.5 lg:block">
-            <span className="connector-dot absolute -top-[5px] h-3 w-3 rounded-full bg-sky-300 shadow-[0_0_16px_4px_rgba(125,211,252,.7)]" />
+            <span className="connector-dot absolute -top-[5px] h-3 w-3 rounded-full bg-indigo-500 shadow-[0_0_14px_4px_rgba(99,102,241,.45)]" />
           </div>
           <div aria-hidden className="connector-v absolute bottom-8 left-8 top-8 w-0.5 lg:hidden">
-            <span className="connector-dot-v absolute -left-[5px] h-3 w-3 rounded-full bg-sky-300 shadow-[0_0_16px_4px_rgba(125,211,252,.7)]" />
+            <span className="connector-dot-v absolute -left-[5px] h-3 w-3 rounded-full bg-indigo-500 shadow-[0_0_14px_4px_rgba(99,102,241,.45)]" />
           </div>
           <ol className="relative grid gap-10 lg:grid-cols-4 lg:gap-6">
             {STEPS.map((s, i) => (
               <li key={s.title}>
                 <Reveal delay={i * 120} className="flex gap-5 lg:flex-col lg:items-center lg:text-center">
-                  <span className="relative grid h-16 w-16 shrink-0 place-items-center rounded-2xl border border-white/10 bg-[#0b1230] shadow-[0_0_0_6px_#060918]">
-                    <s.icon className="h-7 w-7 text-sky-300" aria-hidden />
-                    <span className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full bg-indigo-500 text-xs font-bold">{i + 1}</span>
+                  <span className="relative grid h-16 w-16 shrink-0 place-items-center rounded-2xl border border-slate-200 bg-white shadow-[0_0_0_6px_#fff,0_10px_30px_-10px_rgba(79,70,229,.35)]">
+                    <s.icon className="h-7 w-7 text-indigo-600" aria-hidden />
+                    <span className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full bg-indigo-600 text-xs font-bold text-white">{i + 1}</span>
                   </span>
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wider text-indigo-300">{s.who}</div>
+                    <div className="text-xs font-semibold uppercase tracking-wider text-indigo-600">{s.who}</div>
                     <h3 className="mt-1 text-lg font-semibold">{s.title}</h3>
-                    <p className="mt-1 text-sm text-slate-400">{s.body}</p>
+                    <p className="mt-1 text-sm text-slate-600">{s.body}</p>
                   </div>
                 </Reveal>
               </li>
@@ -186,19 +191,19 @@ export function Landing() {
       {/* Student modules */}
       <section id="features" className="mx-auto max-w-6xl scroll-mt-20 px-4 pb-24">
         <Reveal className="mx-auto max-w-2xl text-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-300">Student portal</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600">Student portal</p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Ten modules behind every card</h2>
-          <p className="mt-4 text-slate-400">Colleges switch each module on or off, and can limit it to certain departments or programmes.</p>
+          <p className="mt-4 text-slate-600">Colleges switch each module on or off, and can limit it to certain departments or programmes.</p>
         </Reveal>
         <div className="mt-12 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
           {MODULES.map((m, i) => (
             <Reveal key={m.title} delay={(i % 5) * 70}>
-              <div className="group h-full rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5 transition duration-300 hover:-translate-y-1 hover:border-sky-400/40 hover:bg-white/[0.06]">
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-[linear-gradient(135deg,rgba(14,165,233,.25),rgba(99,102,241,.25))] ring-1 ring-white/10">
-                  <m.icon className="h-5 w-5 text-sky-200" aria-hidden />
+              <div className="group h-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition duration-300 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 sm:p-5">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-[linear-gradient(135deg,#e0f2fe,#e0e7ff)] ring-1 ring-indigo-100">
+                  <m.icon className="h-5 w-5 text-indigo-600" aria-hidden />
                 </span>
                 <h3 className="mt-4 font-semibold">{m.title}</h3>
-                <p className="mt-1 text-sm text-slate-400">{m.body}</p>
+                <p className="mt-1 text-sm text-slate-600">{m.body}</p>
               </div>
             </Reveal>
           ))}
@@ -206,21 +211,21 @@ export function Landing() {
       </section>
 
       {/* Admin capabilities */}
-      <section className="relative border-y border-white/5 bg-[linear-gradient(180deg,rgba(30,58,138,.18),transparent)]">
+      <section className="relative border-y border-slate-200 bg-[linear-gradient(180deg,#eef2ff,#f8fafc)]">
         <div className="mx-auto max-w-6xl px-4 py-24">
           <Reveal className="max-w-2xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-300">College admin panel</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600">College admin panel</p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Your whole college, in one dashboard</h2>
-            <p className="mt-4 text-slate-400">Students, faculty, academics, attendance, exams, fees, library and transport, all managed by your own team.</p>
+            <p className="mt-4 text-slate-600">Students, faculty, academics, attendance, exams, fees, library and transport, all managed by your own team.</p>
           </Reveal>
           <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {ADMIN.map((a, i) => (
               <Reveal key={a.title} delay={(i % 3) * 90}>
-                <div className="flex h-full gap-4 rounded-2xl border border-white/10 bg-[#0a1029]/80 p-6">
-                  <a.icon className="h-6 w-6 shrink-0 text-indigo-300" aria-hidden />
+                <div className="flex h-full gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <a.icon className="h-6 w-6 shrink-0 text-indigo-600" aria-hidden />
                   <div>
                     <h3 className="font-semibold">{a.title}</h3>
-                    <p className="mt-1 text-sm text-slate-400">{a.body}</p>
+                    <p className="mt-1 text-sm text-slate-600">{a.body}</p>
                   </div>
                 </div>
               </Reveal>
@@ -232,23 +237,23 @@ export function Landing() {
       {/* Roles */}
       <section id="roles" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-300">Built for every role</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600">Built for every role</p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Three panels, one connected system</h2>
         </Reveal>
         <div className="mt-12 grid gap-5 lg:grid-cols-3">
           {[
-            { icon: KeyRound, title: "Super admin", tone: "from-fuchsia-500/30", points: ["Register any college", "Issue & reset admin logins", "Control plans and modules", "Suspend or reactivate"] },
-            { icon: Building2, title: "College admin", tone: "from-indigo-500/30", points: ["Every student record", "Staff accounts & permissions", "Fees, library, transport", "Design the student portal"] },
-            { icon: GraduationCap, title: "Student", tone: "from-sky-500/30", points: ["Tap card for digital ID", "Attendance and results", "Fees and receipts", "Notices and timetable"] },
+            { icon: KeyRound, title: "Super admin", tone: "from-fuchsia-100", points: ["Register any college", "Issue & reset admin logins", "Control plans and modules", "Suspend or reactivate"] },
+            { icon: Building2, title: "College admin", tone: "from-indigo-100", points: ["Every student record", "Staff accounts & permissions", "Fees, library, transport", "Design the student portal"] },
+            { icon: GraduationCap, title: "Student", tone: "from-sky-100", points: ["Tap card for digital ID", "Attendance and results", "Fees and receipts", "Notices and timetable"] },
           ].map((r, i) => (
             <Reveal key={r.title} delay={i * 120}>
-              <div className={`relative h-full overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b ${r.tone} to-transparent p-7`}>
-                <r.icon className="h-8 w-8 text-white" aria-hidden />
+              <div className={`relative h-full overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-b ${r.tone} to-white p-7 shadow-sm`}>
+                <r.icon className="h-8 w-8 text-indigo-600" aria-hidden />
                 <h3 className="mt-5 text-xl font-semibold">{r.title}</h3>
-                <ul className="mt-4 space-y-2.5 text-sm text-slate-300">
+                <ul className="mt-4 space-y-2.5 text-sm text-slate-700">
                   {r.points.map((p) => (
                     <li key={p} className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" aria-hidden /> {p}
+                      <Check className="h-4 w-4 text-emerald-600" aria-hidden /> {p}
                     </li>
                   ))}
                 </ul>
@@ -261,13 +266,13 @@ export function Landing() {
       {/* Security */}
       <section id="security" className="mx-auto max-w-6xl scroll-mt-20 px-4 pb-24">
         <Reveal>
-          <div className="grid items-center gap-10 rounded-3xl border border-white/10 bg-white/[0.03] p-8 sm:p-12 lg:grid-cols-[auto_1fr]">
-            <span className="grid h-20 w-20 place-items-center rounded-3xl bg-emerald-400/10 ring-1 ring-emerald-300/30">
-              <LockKeyhole className="h-9 w-9 text-emerald-300" aria-hidden />
+          <div className="grid items-center gap-10 rounded-3xl border border-emerald-100 bg-emerald-50/50 p-8 sm:p-12 lg:grid-cols-[auto_1fr]">
+            <span className="grid h-20 w-20 place-items-center rounded-3xl bg-white ring-1 ring-emerald-200">
+              <LockKeyhole className="h-9 w-9 text-emerald-600" aria-hidden />
             </span>
             <div>
               <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Private by design</h2>
-              <ul className="mt-5 grid gap-3 text-sm text-slate-300 sm:grid-cols-2">
+              <ul className="mt-5 grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
                 {[
                   "Tapping a card shows only what the college approves",
                   "Marks, fees and attendance always need sign-in",
@@ -275,7 +280,7 @@ export function Landing() {
                   "Each college's data is strictly separated",
                 ].map((t) => (
                   <li key={t} className="flex gap-2">
-                    <ShieldCheck className="h-4 w-4 shrink-0 translate-y-0.5 text-emerald-400" aria-hidden /> {t}
+                    <ShieldCheck className="h-4 w-4 shrink-0 translate-y-0.5 text-emerald-600" aria-hidden /> {t}
                   </li>
                 ))}
               </ul>
@@ -303,10 +308,14 @@ export function Landing() {
         </Reveal>
       </section>
 
-      <footer className="border-t border-white/5">
+      <footer className="border-t border-slate-200 bg-slate-50">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-8 text-sm text-slate-500 sm:flex-row">
           <BrandMark />
-          <p>© {new Date().getFullYear()} MySmartCard Campus · A product of mysmartcard.net</p>
+          <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            <Link href="/login" className="hover:text-slate-900">College &amp; student sign in</Link>
+            <Link href="/login?next=%2Fplatform" className="hover:text-slate-900">Super admin</Link>
+          </nav>
+          <p>© {new Date().getFullYear()} MySmartCard Campus</p>
         </div>
       </footer>
     </main>

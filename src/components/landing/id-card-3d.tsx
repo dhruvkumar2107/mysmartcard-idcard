@@ -36,7 +36,7 @@ export function IdCard3D() {
       {/* NFC field radiating from behind the card */}
       <div aria-hidden className="pointer-events-none absolute inset-0 grid place-items-center">
         {[0, 0.8, 1.6].map((d) => (
-          <span key={d} className="nfc-ripple absolute h-56 w-56 rounded-full border border-sky-300/40" style={{ animationDelay: `${d}s` }} />
+          <span key={d} className="nfc-ripple absolute h-56 w-56 rounded-full border border-indigo-400/40" style={{ animationDelay: `${d}s` }} />
         ))}
       </div>
       <div className="card-float">
@@ -60,7 +60,7 @@ export function IdCard3D() {
           </button>
         </div>
       </div>
-      <p className="mt-8 text-xs text-slate-400">
+      <p className="mt-8 text-xs text-slate-500">
         <span className="[@media(hover:hover)]:hidden">Tap the card to flip it</span>
         <span className="hidden [@media(hover:hover)]:inline">Move your cursor over the card · click to flip</span>
       </p>
