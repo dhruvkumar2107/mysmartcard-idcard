@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { encrypt } from "@/lib/crypto";
 import { list, str, userAction } from "../action";
-import { addCollegeAdmin, createInstitution, resetCollegeAdminPassword, setInstitutionStatus, updateSubscription } from "../services/platform";
+import { addCollegeAdmin, createInstitution, resetCollegeAdminPassword, setInstitutionStatus, updateInstitutionDetails, updateSubscription } from "../services/platform";
 
 /** Credentials are shown once on the next page via a short-lived encrypted httpOnly cookie, never in the URL. */
 async function stash(msg: string) {
@@ -42,6 +42,13 @@ export async function updateSubscriptionAction(fd: FormData) {
   return userAction(fd, "/platform", async (user) => {
     await updateSubscription(user, str(fd, "id"), { plan: str(fd, "plan"), licensedModules: list(fd, "modules"), studentLimit: Number(str(fd, "studentLimit")) });
     return "Subscription updated.";
+  });
+}
+
+export async function updateInstitutionDetailsAction(fd: FormData) {
+  return userAction(fd, "/platform", async (user) => {
+    await updateInstitutionDetails(user, str(fd, "id"), { name: str(fd, "name"), shortName: str(fd, "shortName"), city: str(fd, "city") || null, contactEmail: str(fd, "contactEmail") || null });
+    return "College details updated.";
   });
 }
 

@@ -26,7 +26,7 @@
 ## Vercel (live)
 
 - Project `mysmartcard-campus` in team `nyay-saathis-projects`, production URL <https://mysmartcard-campus.vercel.app>. Functions run in `sin1` (Singapore, next to Neon) via `vercel.json`.
-- Deploy: `vercel deploy --prod`. `.vercelignore` keeps `.env*`, `.data`, `.neon` and tests out of the upload.
+- Deploy: the project is connected to GitHub `dhruvkumar2107/mysmartcard-idcard`. Every push to `main` deploys to production, and other branches get preview URLs. `vercel deploy --prod` still works for manual deploys. Run `npm run db:migrate` against Neon **before** pushing a change that adds a migration. `.vercelignore` keeps `.env*`, `.data`, `.neon` and tests out of the upload.
 - Production env vars: `APP_SECRET`, `APP_URL`, `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `STORAGE_ENDPOINT_URL`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY`, `STORAGE_REGION`, `STORAGE_BUCKET`, `CRON_SECRET`. Vercel reserves `AWS_*` names, so storage uses `STORAGE_*` there.
 - Uploads are capped at 4 MB (Vercel request bodies max out at 4.5 MB).
 - A daily cron (`vercel.json`, 21:30 UTC = 03:00 IST) calls `/api/cron/retention` with `Authorization: Bearer $CRON_SECRET`. Without `CRON_SECRET` the endpoint returns 401.

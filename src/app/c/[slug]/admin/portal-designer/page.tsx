@@ -148,14 +148,14 @@ export default async function PortalDesigner({ params, searchParams }: SlugProps
                 </Field>
               </div>
             </Card>
-            <Card title="Public NFC tap page" description="Fields shown to anyone who taps or scans the card, without signing in. Keep this minimal.">
+            <Card title="Public NFC tap page" description="Fields printed on the digital ID that anyone who taps or scans the card sees, without signing in.">
               <div className="grid grid-cols-2 gap-2">
                 {PUBLIC_FIELDS.map((f) => (
-                  <Checkbox key={f.key} name="publicFields" value={f.key} defaultChecked={draft.publicFields.includes(f.key)} label={f.label} />
+                  <Checkbox key={f.key} name="publicFields" value={f.key} defaultChecked={draft.publicFields.includes(f.key)} label={"personal" in f ? `${f.label} (personal)` : f.label} />
                 ))}
               </div>
               <div className="mt-4">
-                <Alert tone="info">Attendance, marks, fees, contact details and documents are never shown on the public page, whatever is selected here.</Alert>
+                <Alert tone="info">Fields marked personal are visible to anyone holding the card, so enable them only with student consent (for example an emergency contact). Attendance, marks, fees and documents are never shown publicly. Students see them after signing in, and staff who tap a card while signed in get a link to the full record.</Alert>
               </div>
             </Card>
           </div>

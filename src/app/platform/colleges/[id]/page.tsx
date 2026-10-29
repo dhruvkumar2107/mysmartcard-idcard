@@ -1,4 +1,4 @@
-import { Badge, Card, Checkbox, Field, Flash, Input, KV, PageHeader, Select, StatusBadge } from "@/components/ui";
+import { Badge, Card, Checkbox, Field, Flash, Input, KV, PageHeader, Select, Stat, StatusBadge } from "@/components/ui";
 import { CopyButton, SubmitButton } from "@/components/client";
 import { MODULES } from "@/lib/portal-config";
 import { formatDateTime } from "@/lib/format";
@@ -7,7 +7,7 @@ import { orNotFound, requireSuperAdmin } from "@/server/session";
 import { getInstitution } from "@/server/services/platform";
 import { hasActiveSupportGrant } from "@/server/services/settings";
 import { appUrl } from "@/server/services/cards";
-import { addCollegeAdminAction, resetAdminPasswordAction, setInstitutionStatusAction, updateSubscriptionAction } from "@/server/actions/platform";
+import { addCollegeAdminAction, resetAdminPasswordAction, setInstitutionStatusAction, updateInstitutionDetailsAction, updateSubscriptionAction } from "@/server/actions/platform";
 import { OneTimeCredential } from "@/components/server-bits";
 
 export const metadata = { title: "College" };
@@ -15,7 +15,7 @@ export const metadata = { title: "College" };
 export default async function CollegeDetail({ params, searchParams }: Props<{ id: string }>) {
   const { id } = await params;
   const user = await requireSuperAdmin();
-  const { inst, admins } = await orNotFound(getInstitution(user, id));
+  const { inst, admins, usage } = await orNotFound(getInstitution(user, id));
   const support = await hasActiveSupportGrant(inst.id);
   const back = `/platform/colleges/${id}`;
   const loginUrl = `${appUrl()}/login?next=${encodeURIComponent(`/c/${inst.slug}/admin`)}`;
@@ -24,6 +24,13 @@ export default async function CollegeDetail({ params, searchParams }: Props<{ id
       <PageHeader title={inst.name} description={`/c/${inst.slug}`} back={{ href: "/platform", label: "Platform" }} actions={<StatusBadge status={inst.status} />} />
       <Flash searchParams={flashOf(await searchParams)} />
       <OneTimeCredential />
+
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Stat label="Students" value={usage.students.toLocaleString("en-IN")} hint={`limit ${inst.studentLimit.toLocaleString("en-IN")}`} />
+        <Stat label="Faculty" value={usage.faculty.toLocaleString("en-IN")} />
+        <Stat label="Staff accounts" value={usage.staffAccounts.toLocaleString("en-IN")} />
+        <Stat label="Active NFC cards" value={usage.activeCards.toLocaleString("en-IN")} hint={`${usage.totalCards.toLocaleString("en-IN")} issued in total`} />
+      </div>
 
       <Card title="College admin credentials" description="Hand these to the college. Everything inside the college — departments, staff, students, cards, portal — is managed by its administrators." className="mb-6">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -76,16 +83,34 @@ export default async function CollegeDetail({ params, searchParams }: Props<{ id
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card title="Overview">
-          <KV
-            items={[
-              ["Short name", inst.shortName],
-              ["City", inst.city],
-              ["Office email", inst.contactEmail],
-              ["Created", formatDateTime(inst.createdAt)],
-              ["Support access", support ? "Granted (read-only)" : "Not granted — college data is not visible to platform staff"],
-            ]}
-          />
+        <Card title="College details">
+          <form action={updateInstitutionDetailsAction} className="space-y-3">
+            <input type="hidden" name="_back" value={back} />
+            <input type="hidden" name="id" value={inst.id} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="College name" className="sm:col-span-2">
+                <Input name="name" defaultValue={inst.name} required minLength={3} />
+              </Field>
+              <Field label="Short name">
+                <Input name="shortName" defaultValue={inst.shortName} required minLength={2} />
+              </Field>
+              <Field label="City">
+                <Input name="city" defaultValue={inst.city ?? ""} />
+              </Field>
+              <Field label="Office email" className="sm:col-span-2">
+                <Input name="contactEmail" type="email" defaultValue={inst.contactEmail ?? ""} />
+              </Field>
+            </div>
+            <SubmitButton variant="secondary">Save details</SubmitButton>
+          </form>
+          <div className="mt-4 border-t border-line pt-4">
+            <KV
+              items={[
+                ["Created", formatDateTime(inst.createdAt)],
+                ["Support access", support ? "Granted (read-only)" : "Not granted. College records are not visible to platform staff"],
+              ]}
+            />
+          </div>
         </Card>
         <Card title={inst.status === "active" ? "Suspend college" : "Reactivate college"}>
           <form action={setInstitutionStatusAction} className="space-y-3">

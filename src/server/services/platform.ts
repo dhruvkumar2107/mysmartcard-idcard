@@ -244,5 +244,26 @@ export async function getInstitution(actor: Actor, id: string) {
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(and(eq(memberships.institutionId, id), eq(memberships.role, "college_admin")));
-  return { inst, admins };
+  const db = getDb();
+  const [[stu], [fac], [staff], [cards]] = await Promise.all([
+    db.select({ total: count() }).from(students).where(and(eq(students.institutionId, id), sql`${students.status} <> 'archived'`)),
+    db.select({ total: count() }).from(faculty).where(eq(faculty.institutionId, id)),
+    db.select({ total: count() }).from(memberships).where(and(eq(memberships.institutionId, id), sql`${memberships.role} <> 'student'`)),
+    db.select({ total: count(), active: sql<number>`count(*) filter (where ${nfcCards.status} = 'active')::int` }).from(nfcCards).where(eq(nfcCards.institutionId, id)),
+  ]);
+  const usage = { students: stu.total, faculty: fac.total, staffAccounts: staff.total, activeCards: cards.active, totalCards: cards.total };
+  return { inst, admins, usage };
+}
+
+export async function updateInstitutionDetails(actor: Actor, institutionId: string, input: { name: string; shortName: string; city?: string | null; contactEmail?: string | null }) {
+  assertSuper(actor);
+  const data = institutionInput.pick({ name: true, shortName: true, city: true, contactEmail: true }).parse(input);
+  const [inst] = await getDb()
+    .update(institutions)
+    .set({ name: data.name, shortName: data.shortName, city: data.city ?? null, contactEmail: data.contactEmail ?? null })
+    .where(eq(institutions.id, institutionId))
+    .returning();
+  if (!inst) throw notFound("College");
+  await platformAudit(actor, { institutionId, action: "institution.update", entityType: "institution", entityId: institutionId, summary: `Updated details for ${inst.name}`, metadata: data });
+  return inst;
 }

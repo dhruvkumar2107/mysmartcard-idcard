@@ -27,7 +27,19 @@ export const PUBLIC_FIELDS = [
   { key: "status", label: "Student status" },
   { key: "cardValidity", label: "Card validity" },
   { key: "bloodGroup", label: "Blood group (emergency)" },
+  { key: "section", label: "Section" },
+  { key: "admissionYear", label: "Admission year" },
+  { key: "gender", label: "Gender" },
+  { key: "dateOfBirth", label: "Date of birth", personal: true },
+  { key: "email", label: "Student email", personal: true },
+  { key: "phone", label: "Student phone", personal: true },
+  { key: "guardianName", label: "Guardian name", personal: true },
+  { key: "guardianPhone", label: "Emergency contact (guardian phone)", personal: true },
+  { key: "address", label: "Address", personal: true },
 ] as const;
+
+/** Extra rows shown under the ID card on the tap page, in this order. */
+export const PUBLIC_DETAIL_FIELDS = ["section", "admissionYear", "gender", "dateOfBirth", "email", "phone", "guardianName", "guardianPhone", "address"] as const;
 export type PublicFieldKey = (typeof PUBLIC_FIELDS)[number]["key"];
 
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a 6-digit hex colour like #1e3a8a");

@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Lock, ShieldCheck, ShieldX } from "lucide-react";
+import { Lock, ShieldCheck, ShieldX, UserRound } from "lucide-react";
 import { DigitalIdCard } from "@/components/views";
 import { LinkButton } from "@/components/ui";
 import { formatDate } from "@/lib/format";
+import { PUBLIC_DETAIL_FIELDS, PUBLIC_FIELDS } from "@/lib/portal-config";
 import { rateLimit } from "@/lib/rate-limit";
+import { AppError } from "@/lib/errors";
+import { loadTenantContext } from "@/server/context";
+import { getSessionUser } from "@/server/session";
 import { resolveCardToken } from "@/server/services/cards";
 
 export const metadata: Metadata = { title: "Student ID", robots: { index: false, follow: false }, referrer: "no-referrer" };
@@ -47,6 +51,13 @@ export default async function CardPage({ params }: { params: Promise<{ token: st
     );
 
   const f = view.fields;
+  const details = PUBLIC_DETAIL_FIELDS.flatMap((key): [string, string][] => {
+    const value = f[key];
+    if (!value) return [];
+    const label = PUBLIC_FIELDS.find((p) => p.key === key)!.label;
+    return [[label, key === "dateOfBirth" ? formatDate(value) : value]];
+  });
+  const viewer = await viewerRole(view.institution.slug, view.studentId);
   return (
     <main className="min-h-screen bg-bg px-4 py-8" style={{ ["--brand" as string]: view.branding.primaryColor, ["--accent" as string]: view.branding.accentColor }}>
       <div className="mx-auto max-w-sm">
@@ -68,18 +79,57 @@ export default async function CardPage({ params }: { params: Promise<{ token: st
           photoUrl={view.photoAvailable ? `/card/${token}/photo` : null}
           card={"cardValidity" in f ? { status: view.cardStatus, validUntil: f.cardValidity } : null}
           brand={view.branding.primaryColor}
+          details={details}
         />
         <div className="mt-6 rounded-xl border border-line bg-surface p-4 text-center">
-          <Lock className="mx-auto h-5 w-5 text-muted" aria-hidden />
-          <p className="mt-2 text-sm">Is this your card? Sign in to view attendance, results, fees and more.</p>
-          <LinkButton href={`/login?next=${encodeURIComponent(`/c/${view.institution.slug}/portal`)}`} variant="primary" className="mt-3 w-full">
-            Open my student portal
-          </LinkButton>
+          {viewer === "staff" ? (
+            <>
+              <UserRound className="mx-auto h-5 w-5 text-muted" aria-hidden />
+              <p className="mt-2 text-sm">You are signed in as {view.institution.shortName} staff.</p>
+              <LinkButton href={`/c/${view.institution.slug}/admin/students/${view.studentId}`} variant="primary" className="mt-3 w-full">
+                View full student record
+              </LinkButton>
+            </>
+          ) : viewer === "owner" ? (
+            <>
+              <UserRound className="mx-auto h-5 w-5 text-muted" aria-hidden />
+              <p className="mt-2 text-sm">This is your card. Your attendance, results, fees and more are in your portal.</p>
+              <LinkButton href={`/c/${view.institution.slug}/portal`} variant="primary" className="mt-3 w-full">
+                Open my student portal
+              </LinkButton>
+            </>
+          ) : (
+            <>
+              <Lock className="mx-auto h-5 w-5 text-muted" aria-hidden />
+              <p className="mt-2 text-sm">Is this your card? Sign in to view attendance, results, fees and more.</p>
+              <LinkButton href={`/login?next=${encodeURIComponent(`/c/${view.institution.slug}/portal`)}`} variant="primary" className="mt-3 w-full">
+                Open my student portal
+              </LinkButton>
+            </>
+          )}
         </div>
         <p className="mt-4 text-center text-xs text-muted">Verified {formatDate(new Date(), { dateStyle: "medium", timeStyle: "short" })} · MySmartCard Campus</p>
       </div>
     </main>
   );
+}
+
+/**
+ * Who is tapping: the card's own student, college staff allowed to view
+ * students, or anyone else. Only changes which link is offered; the linked
+ * pages run their own authorization.
+ */
+async function viewerRole(slug: string, studentId: string): Promise<"owner" | "staff" | "public"> {
+  const user = await getSessionUser();
+  if (!user) return "public";
+  try {
+    const ctx = await loadTenantContext(user, slug);
+    if (ctx.studentId) return ctx.studentId === studentId ? "owner" : "public";
+    return ctx.perms.has("students.view") ? "staff" : "public";
+  } catch (e) {
+    if (e instanceof AppError) return "public";
+    throw e;
+  }
 }
 
 function Shell({ children }: { children: React.ReactNode }) {

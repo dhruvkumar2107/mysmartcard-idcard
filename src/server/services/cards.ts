@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
 import { getDb, type Executor } from "@/db";
-import { cardEvents, cardTokens, departments, institutions, institutionSettings, nfcCards, programmes, students, users } from "@/db/schema";
+import { cardEvents, cardTokens, departments, institutions, institutionSettings, nfcCards, programmes, sections, students, users } from "@/db/schema";
 import { decrypt, encrypt, generateToken, sha256 } from "@/lib/crypto";
 import { badRequest } from "@/lib/errors";
 import { normalizeConfig } from "@/lib/portal-config";
@@ -262,10 +262,11 @@ export async function resolveCardToken(token: string, opts: { countTap?: boolean
   if (opts.countTap !== false) await db.update(cardTokens).set({ tapCount: sql`${cardTokens.tapCount} + 1`, lastTappedAt: new Date() }).where(eq(cardTokens.id, row.token.id));
 
   const [s] = await db
-    .select({ student: students, departmentName: departments.name, programmeName: programmes.name })
+    .select({ student: students, departmentName: departments.name, programmeName: programmes.name, sectionName: sections.name })
     .from(students)
     .leftJoin(departments, eq(departments.id, students.departmentId))
     .leftJoin(programmes, eq(programmes.id, students.programmeId))
+    .leftJoin(sections, eq(sections.id, students.sectionId))
     .where(and(eq(students.id, row.card.studentId), eq(students.institutionId, row.institution.id)))
     .limit(1);
   if (!s || s.student.status === "archived") return { state: "inactive", institution: inst };
@@ -283,6 +284,15 @@ export async function resolveCardToken(token: string, opts: { countTap?: boolean
     status: s.student.status,
     cardValidity: row.card.validUntil,
     bloodGroup: s.student.bloodGroup,
+    section: s.sectionName,
+    admissionYear: s.student.admissionYear ? String(s.student.admissionYear) : null,
+    gender: s.student.gender,
+    dateOfBirth: s.student.dateOfBirth,
+    email: s.student.email,
+    phone: s.student.phone,
+    guardianName: s.student.guardianName,
+    guardianPhone: s.student.guardianPhone,
+    address: s.student.address,
   };
   const fields = Object.fromEntries(Object.entries(all).filter(([k]) => allowed.has(k)));
   return {

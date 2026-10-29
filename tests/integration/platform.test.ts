@@ -25,7 +25,7 @@ import * as portal from "@/server/services/portal";
 import * as notices from "@/server/services/notices";
 import * as library from "@/server/services/library";
 import * as timetable from "@/server/services/timetable";
-import { setInstitutionStatus } from "@/server/services/platform";
+import { getInstitution, setInstitutionStatus, updateInstitutionDetails } from "@/server/services/platform";
 import { runRetention } from "@/server/services/maintenance";
 import { rateLimit, resetRateLimits } from "@/lib/rate-limit";
 
@@ -258,6 +258,22 @@ describe("NFC card lifecycle", () => {
     expect(view.state === "ok" && Object.keys(view.fields)).toEqual(["fullName"]);
   });
 
+  it("shows extra details such as section and emergency contact only when the college enables them", async () => {
+    await settings.saveDraftConfig(A, { ...A.draftConfig, publicFields: ["fullName", "section", "guardianPhone", "notAField"] });
+    A = await ctxFor("admin@northbridge.test", "northbridge");
+    await settings.publishConfig(A);
+    const [c] = (await cards.listCards(A, { status: "active" })).filter((x) => x.card.studentId);
+    const view = await cards.resolveCardToken((await cards.liveTokenForCard(A, c.card.id))!.token);
+    expect(view.state).toBe("ok");
+    if (view.state !== "ok") return;
+    expect(Object.keys(view.fields).sort()).toEqual(["fullName", "guardianPhone", "section"]);
+    expect(view.fields.section).toBeTruthy();
+    expect(JSON.stringify(view)).not.toMatch(/@northbridge\.test|address/i);
+    await settings.saveDraftConfig(A, { ...A.draftConfig, publicFields: ["fullName"] });
+    A = await ctxFor("admin@northbridge.test", "northbridge");
+    await settings.publishConfig(A);
+  });
+
   it("rotation, deactivation, loss and replacement invalidate old URLs and keep the student link", async () => {
     const [c] = await cards.listCards(A, { status: "active" });
     const studentId = c.card.studentId!;
@@ -295,6 +311,20 @@ describe("NFC card lifecycle", () => {
     await setInstitutionStatus(sa, B.institution.id, "suspended", "billing");
     expect((await cards.resolveCardToken(t)).state).toBe("inactive");
     await setInstitutionStatus(sa, B.institution.id, "active", "resolved");
+  });
+});
+
+describe("platform college management", () => {
+  it("lets only the super admin edit college details and see usage counts", async () => {
+    const [sa] = await getDb().select().from(schema.users).where(eq(schema.users.email, "platform@mysmartcard.test"));
+    const { usage } = await getInstitution(sa, B.institution.id);
+    expect(usage.students).toBe(4);
+    expect(usage.activeCards).toBeGreaterThan(0);
+    const updated = await updateInstitutionDetails(sa, B.institution.id, { name: "Riverside College of Arts", shortName: "RCA", city: "Pune", contactEmail: null });
+    expect(updated.name).toBe("Riverside College of Arts");
+    expect(updated.slug).toBe(B.institution.slug);
+    const [admin] = await getDb().select().from(schema.users).where(eq(schema.users.email, "admin@riverside.test"));
+    await expectDenied(updateInstitutionDetails(admin, B.institution.id, { name: "Hijacked", shortName: "HJ" }));
   });
 });
 
