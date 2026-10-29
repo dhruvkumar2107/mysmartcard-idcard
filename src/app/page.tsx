@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowRight, Building2, GraduationCap, ShieldCheck, Nfc } from "lucide-react";
+import { ArrowRight, Building2, GraduationCap, ShieldCheck } from "lucide-react";
+import { Landing } from "@/components/landing/landing";
 import { BrandMark } from "@/components/brand";
-import { Badge, Card, LinkButton } from "@/components/ui";
+import { Badge, Card } from "@/components/ui";
 import { ROLE_LABELS, isRole } from "@/lib/permissions";
 import { getSessionUser } from "@/server/session";
 import { myWorkspaces } from "@/server/services/platform";
@@ -53,45 +54,6 @@ export default async function Home() {
           </Link>
         ))}
         {!live.length && !user.isSuperAdmin && <Card>Your account is not linked to any active college yet. Contact your college administrator.</Card>}
-      </div>
-    </main>
-  );
-}
-
-function Landing() {
-  const features = [
-    { icon: Building2, title: "One platform, many colleges", body: "Each institution gets an isolated workspace with its own branding, records and permissions." },
-    { icon: Nfc, title: "NFC student ID", body: "A tap opens the student's verified digital ID. Private records always require sign-in." },
-    { icon: GraduationCap, title: "Complete academic portal", body: "Attendance, results, timetable, notices, coursework, fees, library and transport." },
-  ];
-  return (
-    <main className="min-h-screen bg-[radial-gradient(ellipse_at_top,_#e0e9ff,_var(--bg)_60%)]">
-      <div className="mx-auto max-w-5xl px-4 py-8">
-        <header className="flex items-center justify-between">
-          <BrandMark />
-          <LinkButton href="/login" variant="primary">
-            Sign in
-          </LinkButton>
-        </header>
-        <section className="py-20 text-center">
-          <h1 className="mx-auto max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">The campus operating system behind every student ID card.</h1>
-          <p className="mx-auto mt-4 max-w-2xl text-lg text-muted">Student records, academics and NFC digital identity for colleges and universities, with strict separation between institutions.</p>
-          <div className="mt-8 flex justify-center gap-3">
-            <LinkButton href="/login" variant="primary">
-              Sign in to your college <ArrowRight className="h-4 w-4" aria-hidden />
-            </LinkButton>
-          </div>
-        </section>
-        <section className="grid gap-4 sm:grid-cols-3">
-          {features.map((f) => (
-            <div key={f.title} className="rounded-xl border border-line bg-surface p-5">
-              <f.icon className="h-5 w-5 text-brand" aria-hidden />
-              <h2 className="mt-3 font-semibold">{f.title}</h2>
-              <p className="mt-1 text-sm text-muted">{f.body}</p>
-            </div>
-          ))}
-        </section>
-        <p className="mt-16 text-center text-xs text-muted">MySmartCard Campus is a separate product from mysmartcard.net.</p>
       </div>
     </main>
   );
