@@ -79,14 +79,9 @@ export function Landing() {
             <a href="#roles" className="hover:text-slate-900">For colleges</a>
             <a href="#security" className="hover:text-slate-900">Security</a>
           </nav>
-          <div className="flex items-center gap-2 sm:gap-3">
-            <Link href="/login?next=%2Fplatform" aria-label="Super admin sign in" className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700">
-              <KeyRound className="h-4 w-4" aria-hidden /> <span className="hidden sm:inline">Super admin</span>
-            </Link>
-            <Link href="/login" className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700">
-              Sign in
-            </Link>
-          </div>
+          <Link href="/login" className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700">
+            Sign in
+          </Link>
         </div>
       </header>
 
@@ -311,10 +306,6 @@ export function Landing() {
       <footer className="border-t border-slate-200 bg-slate-50">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-8 text-sm text-slate-500 sm:flex-row">
           <BrandMark />
-          <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
-            <Link href="/login" className="hover:text-slate-900">College &amp; student sign in</Link>
-            <Link href="/login?next=%2Fplatform" className="hover:text-slate-900">Super admin</Link>
-          </nav>
           <p>© {new Date().getFullYear()} MySmartCard Campus</p>
         </div>
       </footer>

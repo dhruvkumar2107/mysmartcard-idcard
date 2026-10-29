@@ -14,7 +14,8 @@
     "db:seed": "tsx --env-file-if-exists=.env.local scripts/seed.ts",
     "db:reset": "tsx --env-file-if-exists=.env.local scripts/reset-local.ts",
     "setup": "npm run db:migrate",
-    "admin:create": "tsx --env-file-if-exists=.env.local scripts/create-super-admin.ts"
+    "admin:create": "tsx --env-file-if-exists=.env.local scripts/create-super-admin.ts",
+    "demo:university": "tsx --env-file-if-exists=.env.local scripts/seed-demo-university.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1159.0",

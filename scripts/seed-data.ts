@@ -36,8 +36,15 @@ function rng(seed: number) {
 const FIRST = ["Aarav", "Diya", "Kabir", "Meera", "Rohan", "Ananya", "Vihaan", "Isha", "Arjun", "Saanvi", "Reyansh", "Tara", "Aditya", "Kiara", "Dhruv", "Myra", "Ishaan", "Navya", "Krish", "Zara", "Om", "Riya", "Yash", "Pari"];
 const LAST = ["Sharma", "Iyer", "Khan", "Reddy", "Patel", "Menon", "Das", "Gill", "Nair", "Joshi", "Bose", "Rao", "Kapoor", "Singh", "Verma", "Pillai"];
 
-async function setPassword(email: string) {
-  await getDb().update(users).set({ passwordHash: await hashPassword(DEMO_PASSWORD), mustChangePassword: false }).where(eq(users.email, email));
+async function setPassword(email: string, password: string) {
+  await getDb().update(users).set({ passwordHash: await hashPassword(password), mustChangePassword: false }).where(eq(users.email, email));
+}
+
+/** Run `fn` over `items`, `size` at a time, so remote databases are not hit one round trip at a time. */
+async function inBatches<T, R>(items: T[], size: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += size) out.push(...(await Promise.all(items.slice(i, i + size).map((item, j) => fn(item, i + j)))));
+  return out;
 }
 
 async function ensureSuperAdmin() {
@@ -55,7 +62,7 @@ async function ctxFor(email: string, slug: string): Promise<TenantContext> {
   return loadTenantContext(u, slug);
 }
 
-type CollegeSpec = {
+export type CollegeSpec = {
   slug: string;
   name: string;
   shortName: string;
@@ -65,12 +72,38 @@ type CollegeSpec = {
   departments: { code: string; name: string; programme: { code: string; name: string }; subjects: { code: string; name: string; credits: number; kind: "theory" | "lab" }[] }[];
   studentsPerSection: number;
   rich: boolean;
+  /** Sections per department (A, B, C…). Default 1. */
+  sectionsPerDepartment?: number;
+  firstNames?: string[];
+  lastNames?: string[];
+  /** Students who get a portal login. Default 2. */
+  portalStudents?: number;
+  /** Students with a library book issued. Default 4. */
+  libraryLoans?: number;
+  /** Students assigned to a bus route. Default 6. */
+  transportStudents?: number;
+  streets?: string[];
+  /** Concurrent service calls for per-student work. Default 1 (sequential). */
+  concurrency?: number;
 };
 
-export async function seedCollege(spec: CollegeSpec) {
+type SeedOptions = {
+  /** Super admin who onboards the college. Default: the fictional platform@mysmartcard.test account. */
+  actor?: { id: string; name: string; isSuperAdmin: boolean };
+  /** Password for every seeded login. Default DEMO_PASSWORD. */
+  password?: string;
+  log?: (msg: string) => void;
+};
+
+export async function seedCollege(spec: CollegeSpec, opts: SeedOptions = {}) {
   const rand = rng(spec.seed);
   const pick = <T,>(a: T[]) => a[Math.floor(rand() * a.length)];
-  const superAdmin = await ensureSuperAdmin();
+  const first = spec.firstNames ?? FIRST;
+  const last = spec.lastNames ?? LAST;
+  const password = opts.password ?? DEMO_PASSWORD;
+  const log = opts.log ?? (() => {});
+  const batch = spec.concurrency ?? 1;
+  const superAdmin = opts.actor ?? (await ensureSuperAdmin());
   const adminEmail = `admin@${spec.domain}`;
   await createInstitution(superAdmin, {
     name: spec.name,
@@ -84,7 +117,7 @@ export async function seedCollege(spec: CollegeSpec) {
     adminName: `${spec.shortName} Administrator`,
     adminEmail,
   });
-  await setPassword(adminEmail);
+  await setPassword(adminEmail, password);
   let admin = await ctxFor(adminEmail, spec.slug);
 
   const year = "2026-27";
@@ -93,49 +126,55 @@ export async function seedCollege(spec: CollegeSpec) {
   for (const d of spec.departments) {
     const dep = await academics.createDepartment(admin, { code: d.code, name: d.name });
     const prog = await academics.createProgramme(admin, { departmentId: dep.id, code: d.programme.code, name: d.programme.name, durationSemesters: 8 });
-    const secA = await academics.createSection(admin, { programmeId: prog.id, semester: sem, name: "A", academicYear: year });
+    const secs = [];
+    for (let i = 0; i < (spec.sectionsPerDepartment ?? 1); i++)
+      secs.push(await academics.createSection(admin, { programmeId: prog.id, semester: sem, name: String.fromCharCode(65 + i), academicYear: year }));
     const subs = [];
     for (const s of d.subjects) subs.push(await academics.createSubject(admin, { departmentId: dep.id, programmeId: prog.id, semester: sem, ...s }));
-    deptRows.push({ dep, prog, secA, subs });
+    deptRows.push({ dep, prog, secs, subs });
   }
+  log(`academics: ${deptRows.length} departments, ${deptRows.reduce((n, d) => n + d.secs.length, 0)} sections`);
 
-  // Faculty — one per subject, first department's first faculty is HOD.
+  // Faculty — one per subject per section, first department's first faculty is HOD.
   const facultyRows: { f: Awaited<ReturnType<typeof people.createFaculty>>; email: string }[] = [];
-  const facultyBySubject = new Map<string, string>();
+  const facultyFor = new Map<string, string>(); // `${subjectId}:${sectionId}` -> facultyId
   let fi = 1;
   for (const d of deptRows) {
-    for (const s of d.subs) {
-      const name = `Dr. ${pick(FIRST)} ${pick(LAST)}`;
-      const email = `faculty${fi}@${spec.domain}`;
-      const f = await people.createFaculty(admin, { employeeCode: `${spec.shortName}-F${String(fi).padStart(3, "0")}`, name, email, phone: `+91 90000 ${String(10000 + fi).slice(-5)}`, designation: fi % 3 === 1 ? "Associate Professor" : "Assistant Professor", departmentId: d.dep.id });
-      await academics.assignClass(admin, { facultyId: f.id, subjectId: s.id, sectionId: d.secA.id });
-      facultyBySubject.set(s.id, f.id);
-      facultyRows.push({ f, email });
-      fi++;
+    for (const sec of d.secs) {
+      for (const s of d.subs) {
+        const name = `Dr. ${pick(first)} ${pick(last)}`;
+        const email = `faculty${fi}@${spec.domain}`;
+        const f = await people.createFaculty(admin, { employeeCode: `${spec.shortName}-F${String(fi).padStart(3, "0")}`, name, email, phone: `+91 90000 ${String(10000 + fi).slice(-5)}`, designation: fi % 3 === 1 ? "Associate Professor" : "Assistant Professor", departmentId: d.dep.id });
+        await academics.assignClass(admin, { facultyId: f.id, subjectId: s.id, sectionId: sec.id });
+        facultyFor.set(`${s.id}:${sec.id}`, f.id);
+        facultyRows.push({ f, email });
+        fi++;
+      }
     }
   }
+  log(`faculty: ${facultyRows.length}`);
   await people.grantStaffAccess(admin, facultyRows[0].f.id, "hod");
-  await setPassword(facultyRows[0].email);
+  await setPassword(facultyRows[0].email, password);
   for (const r of facultyRows.slice(1, 3)) {
     await people.grantStaffAccess(admin, r.f.id, "faculty");
-    await setPassword(r.email);
+    await setPassword(r.email, password);
   }
   if (spec.rich) {
     for (const [role, label] of [["principal", "Principal"], ["accountant", "Accounts Officer"], ["librarian", "Librarian"], ["transport_admin", "Transport Office"]] as const) {
       const email = `${role.replace("_", "")}@${spec.domain}`;
       await people.createStaffUser(admin, { name: `${label} (${spec.shortName})`, email, role, departmentId: null });
-      await setPassword(email);
+      await setPassword(email, password);
     }
   }
   admin = await ctxFor(adminEmail, spec.slug);
 
   // Students
-  const allStudents: { id: string; enrollmentNo: string; sectionId: string }[] = [];
+  const plan: { d: (typeof deptRows)[number]; sectionId: string; n: number }[] = [];
   let n = 1;
-  for (const d of deptRows) {
-    for (let i = 0; i < spec.studentsPerSection; i++) {
-      const fullName = `${pick(FIRST)} ${pick(LAST)}`;
-      const enrollmentNo = `${spec.shortName}${d.dep.code}25${String(n).padStart(3, "0")}`;
+  for (const d of deptRows) for (const sec of d.secs) for (let i = 0; i < spec.studentsPerSection; i++) plan.push({ d, sectionId: sec.id, n: n++ });
+  const allStudents = await inBatches(plan, batch, async ({ d, sectionId, n }) => {
+      const fullName = `${pick(first)} ${pick(last)}`;
+      const enrollmentNo = `${spec.shortName}${d.dep.code}25${String(n).padStart(plan.length >= 1000 ? 4 : 3, "0")}`;
       const s = await studentsSvc.createStudent(admin, {
         enrollmentNo,
         fullName,
@@ -143,38 +182,43 @@ export async function seedCollege(spec: CollegeSpec) {
         phone: `+91 98${String(10000000 + n * 7919).slice(-8)}`,
         dateOfBirth: `2006-${String((n % 12) + 1).padStart(2, "0")}-${String((n % 27) + 1).padStart(2, "0")}`,
         gender: n % 2 ? "Female" : "Male",
-        guardianName: `${pick(FIRST)} ${fullName.split(" ")[1]}`,
+        guardianName: `${pick(first)} ${fullName.split(" ")[1]}`,
         guardianPhone: `+91 97${String(20000000 + n * 104729).slice(-8)}`,
-        address: `${10 + n}, ${pick(["Lake View Road", "Station Road", "MG Road", "Park Street"])}, ${spec.city}`,
+        address: `${10 + n}, ${pick(spec.streets ?? ["Lake View Road", "Station Road", "MG Road", "Park Street"])}, ${spec.city}`,
         bloodGroup: pick(["A+", "B+", "O+", "AB+", "O-"]),
         departmentId: d.dep.id,
         programmeId: d.prog.id,
-        sectionId: d.secA.id,
+        sectionId,
         semester: sem,
         academicYear: year,
         admissionYear: 2025,
         status: "active",
       });
-      allStudents.push({ id: s.id, enrollmentNo, sectionId: d.secA.id });
-      n++;
-    }
-  }
-  // Portal accounts for the first two students of each college.
-  for (const s of allStudents.slice(0, 2)) {
+      return { id: s.id, enrollmentNo, sectionId };
+  });
+  log(`students: ${allStudents.length}`);
+  // Portal accounts for the first few students of each college.
+  const portalLogins: { enrollmentNo: string; email: string }[] = [];
+  for (const s of allStudents.slice(0, spec.portalStudents ?? 2)) {
     const res = await studentsSvc.enablePortalAccess(admin, s.id);
-    await setPassword(res.email);
+    await setPassword(res.email, password);
+    portalLogins.push({ enrollmentNo: s.enrollmentNo, email: res.email });
   }
 
   // Timetable: Mon–Fri, one subject per slot, rooms per department.
   const times = [["09:00", "09:55"], ["10:00", "10:55"], ["11:10", "12:05"], ["13:00", "14:50"]];
   for (const [di, d] of deptRows.entries()) {
-    for (let day = 1; day <= 5; day++) {
-      for (let p = 0; p < Math.min(times.length, d.subs.length); p++) {
-        const subj = d.subs[(p + day) % d.subs.length];
-        await timetable.addTimetableEntry(admin, { sectionId: d.secA.id, subjectId: subj.id, facultyId: facultyBySubject.get(subj.id)!, room: subj.kind === "lab" ? `${d.dep.code}-LAB${di + 1}` : `${d.dep.code}-${100 + day}`, dayOfWeek: day, startTime: times[p][0], endTime: times[p][1] });
+    for (const [si, sec] of d.secs.entries()) {
+      const suffix = d.secs.length > 1 ? sec.name : "";
+      for (let day = 1; day <= 5; day++) {
+        for (let p = 0; p < Math.min(times.length, d.subs.length); p++) {
+          const subj = d.subs[(p + day) % d.subs.length];
+          await timetable.addTimetableEntry(admin, { sectionId: sec.id, subjectId: subj.id, facultyId: facultyFor.get(`${subj.id}:${sec.id}`)!, room: subj.kind === "lab" ? `${d.dep.code}-LAB${di + 1}${suffix}` : `${d.dep.code}-${100 * (si + 1) + day}`, dayOfWeek: day, startTime: times[p][0], endTime: times[p][1] });
+        }
       }
     }
   }
+  log("timetable done");
 
   // Attendance for the last 15 weekdays.
   const classes = await academics.listClassAssignments(admin);
@@ -186,17 +230,18 @@ export async function seedCollege(spec: CollegeSpec) {
     const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
     if (dow === 0 || dow === 6) continue;
     marked++;
-    for (const c of classes) {
+    await inBatches(classes, batch, async (c) => {
       const roster = await attendance.rosterForSection(admin, c.sectionId);
       const statuses = Object.fromEntries(roster.map((r, i) => [r.id, (rand() < (i % 5 === 0 ? 0.35 : 0.1) ? "absent" : rand() < 0.05 ? "late" : "present") as "absent" | "late" | "present"]));
       await attendance.markAttendance(admin, { classAssignmentId: c.id, date, period: 1, topic: null, statuses });
-    }
+    });
   }
+  log("attendance done");
   // Backdate session creation so the 48h edit lock behaves realistically.
   await getDb().update(attendanceSessions).set({ createdAt: new Date(Date.now() - 3 * 86400000) }).where(eq(attendanceSessions.institutionId, admin.institution.id));
 
   // Assessments: internal + practical published, midterm submitted (awaiting approval), end-sem scheduled.
-  for (const c of classes) {
+  await inBatches(classes, batch, async (c) => {
     const roster = await attendance.rosterForSection(admin, c.sectionId);
     const mk = async (name: string, category: string, max: number, examDate: string | null, publish: boolean | "submitted") => {
       const a = await assessments.createAssessment(admin, { subjectId: c.subjectId, sectionId: c.sectionId, name, category: category as never, maxMarks: max, examDate, startTime: examDate ? "10:00" : null, endTime: examDate ? "13:00" : null, room: examDate ? "Exam Hall 1" : null });
@@ -213,7 +258,8 @@ export async function seedCollege(spec: CollegeSpec) {
     await mk("Viva", "viva", 10, addDaysISO(today, -5), true);
     await mk("Midterm Examination", "midterm", 50, addDaysISO(today, -3), "submitted");
     await mk("End-Semester Examination", "end_semester", 100, addDaysISO(today, 30 + (classes.indexOf(c) % 5) * 2), false);
-  }
+  });
+  log("assessments done");
 
   // Calendar
   await timetable.addCalendarEvent(admin, { title: "Founders' Day — campus closed", kind: "holiday", startDate: addDaysISO(today, 9), endDate: null, sectionId: null, description: null });
@@ -227,17 +273,18 @@ export async function seedCollege(spec: CollegeSpec) {
   await notices.createNotice(admin, { title: "Draft: sports day volunteers", body: "Draft notice — not visible to students until published.", category: "event", pinned: false, publishAt: null, expiresAt: null, publish: false, notifyEmail: false, audience: { scope: "all" } });
 
   // Coursework
-  for (const c of classes.slice(0, 3)) {
+  for (const c of classes.slice(0, Math.max(3, Math.ceil(classes.length / 2)))) {
     await coursework.createCoursework(admin, { subjectId: c.subjectId, sectionId: c.sectionId, kind: "assignment", title: `${c.subjectCode} Problem Set 3`, instructions: "Solve all questions. Submit a single PDF.", dueAt: new Date(Date.now() + 6 * 86400000), maxMarks: 20, acceptSubmissions: true });
     await coursework.createCoursework(admin, { subjectId: c.subjectId, sectionId: c.sectionId, kind: "material", title: `${c.subjectCode} Unit 2 lecture notes`, instructions: "Read chapters 4–5 before next week's class.", dueAt: null, maxMarks: null, acceptSubmissions: false });
   }
 
   // Fees
-  for (const [i, s] of allStudents.entries()) {
+  await inBatches(allStudents, batch, async (s, i) => {
     const tuition = await finance.addFeeDemand(admin, { studentId: s.id, category: "tuition", description: "Semester 3 tuition", amount: 6250000, dueDate: addDaysISO(today, -15), academicYear: year });
     await finance.addFeeDemand(admin, { studentId: s.id, category: "exam", description: "End-semester examination fee", amount: 250000, dueDate: addDaysISO(today, 20), academicYear: year });
     if (i % 4 !== 3) await finance.recordPayment(admin, { studentId: s.id, demandId: tuition.id, amount: i % 4 === 2 ? 3000000 : 6250000, method: i % 2 ? "upi" : "bank_transfer", reference: `UTR${String(880000 + i * 37)}`, paidAt: new Date(Date.now() - (20 - (i % 10)) * 86400000) });
-  }
+  });
+  log("fees done");
 
   // Library
   const books = [
@@ -248,28 +295,39 @@ export async function seedCollege(spec: CollegeSpec) {
     ["Computer Networks", "Tanenbaum & Wetherall"],
     ["Digital Design", "Morris Mano"],
   ];
-  for (const [i, [title, author]] of books.entries()) await library.addBook(admin, { accessionNo: `ACC${1000 + i}`, isbn: null, title, author });
-  for (const [i, s] of allStudents.slice(0, 4).entries()) await library.issueBook(admin, { accessionNo: `ACC${1000 + i}`, enrollmentNo: s.enrollmentNo });
+  const loans = spec.libraryLoans ?? 4;
+  const copies = Math.max(1, Math.ceil((loans + 2) / books.length));
+  let acc = 1000;
+  for (let c = 0; c < copies; c++) for (const [title, author] of books) await library.addBook(admin, { accessionNo: `ACC${acc++}`, isbn: null, title, author });
+  for (const [i, s] of allStudents.slice(0, loans).entries()) await library.issueBook(admin, { accessionNo: `ACC${1000 + i}`, enrollmentNo: s.enrollmentNo });
 
   // Transport
   const r1 = await transport.createRoute(admin, { code: "R1", name: `${spec.city} Central – Campus`, vehicleNo: "KA-01-AB-1234", driverName: "R. Kumar", contactPhone: "+91 80000 11111" });
-  const stops = [];
+  const stops: Awaited<ReturnType<typeof transport.addStop>>[] = [];
   for (const [i, [name, pick_, drop]] of [["Central Bus Stand", "07:20", "17:45"], ["Clock Tower", "07:35", "17:30"], ["Tech Park Gate", "07:50", "17:15"]].entries())
     stops.push(await transport.addStop(admin, { routeId: r1.id, name, sequence: i + 1, pickupTime: pick_, dropTime: drop }));
-  for (const [i, s] of allStudents.slice(0, 6).entries()) await transport.assignTransport(admin, { enrollmentNo: s.enrollmentNo, routeId: r1.id, stopId: stops[i % stops.length].id });
+  await inBatches(allStudents.slice(0, spec.transportStudents ?? 6), batch, (s, i) => transport.assignTransport(admin, { enrollmentNo: s.enrollmentNo, routeId: r1.id, stopId: stops[i % stops.length].id }));
+  log("library & transport done");
 
   // NFC cards
   const serials = Array.from({ length: allStudents.length + 5 }, (_, i) => `${spec.shortName}-NFC-${String(i + 1).padStart(5, "0")}`);
-  await cards.registerCards(admin, serials);
-  const pool = await cards.unassignedCards(admin);
+  for (let i = 0; i < serials.length; i += 1000) await cards.registerCards(admin, serials.slice(i, i + 1000));
   const tokens: { enrollmentNo: string; url: string }[] = [];
-  for (const [i, s] of allStudents.entries()) {
-    const res = await cards.assignCard(admin, pool[i].id, s.id, `${new Date().getFullYear() + 1}-06-30`);
-    tokens.push({ enrollmentNo: s.enrollmentNo, url: res.url });
+  // unassignedCards returns one page (500), so assign in page-sized chunks.
+  for (let start = 0; start < allStudents.length; start += 500) {
+    const pool = await cards.unassignedCards(admin);
+    const chunk = allStudents.slice(start, start + 500);
+    tokens.push(
+      ...(await inBatches(chunk, batch, async (s, i) => {
+        const res = await cards.assignCard(admin, pool[i].id, s.id, `${new Date().getFullYear() + 1}-06-30`);
+        return { enrollmentNo: s.enrollmentNo, url: res.url };
+      })),
+    );
   }
+  log("cards done");
 
   const firstStudentEmail = (await getDb().select({ e: studentsTable.email }).from(studentsTable).where(eq(studentsTable.id, allStudents[0].id)))[0].e;
-  return { slug: spec.slug, adminEmail, hodEmail: facultyRows[0].email, facultyEmail: facultyRows[1].email, studentEmail: firstStudentEmail, sampleCard: tokens[0] };
+  return { slug: spec.slug, adminEmail, hodEmail: facultyRows[0].email, facultyEmail: facultyRows[1].email, studentEmail: firstStudentEmail, sampleCard: tokens[0], portalLogins, sampleCards: tokens.slice(0, 5) };
 }
 
 export const COLLEGES: CollegeSpec[] = [
