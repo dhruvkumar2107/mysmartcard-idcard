@@ -1,26 +1,52 @@
 {
-  "name": "campus",
+  "name": "mysmartcard-campus",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --env-file-if-exists=.env.local scripts/migrate.ts",
+    "db:seed": "tsx --env-file-if-exists=.env.local scripts/seed.ts",
+    "db:reset": "tsx --env-file-if-exists=.env.local scripts/reset-local.ts",
+    "setup": "npm run db:migrate",
+    "admin:create": "tsx --env-file-if-exists=.env.local scripts/create-super-admin.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1159.0",
+    "@electric-sql/pglite": "^0.5.13",
+    "bcryptjs": "^3.0.3",
+    "drizzle-orm": "^0.45.4",
+    "lucide-react": "^1.63.0",
     "next": "16.4.3",
+    "papaparse": "^5.7.0",
+    "pg": "^8.23.1",
+    "qrcode": "^1.5.4",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "read-excel-file": "^9.3.13",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@neon/config": "^1.9.5",
     "@tailwindcss/turbopack": "^4",
-    "@types/node": "^20",
+    "@types/node": "^22.20.5",
+    "@types/papaparse": "^5.5.2",
+    "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^5.0.5"
   }
 }

@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+!.env.example
+
+# local database, uploads
+.data/
+.neon
+
+.vercel
+.env*
+!.env.example
