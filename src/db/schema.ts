@@ -53,8 +53,35 @@ export const institutionSettings = pgTable("institution_settings", {
   publishedAt: timestamp("published_at", { withTimezone: true }),
   academic: jsonb("academic").notNull(), // attendance threshold, grade scale
   permissionOverrides: jsonb("permission_overrides").$type<Record<string, Record<string, boolean>>>().notNull().default({}),
+  /** Super-admin portal policy for this college: only explicitly overridden keys (see src/lib/portal-config.ts). */
+  policyDraft: jsonb("policy_draft").notNull().default({}),
+  policyPublished: jsonb("policy_published").notNull().default({}),
+  policyPublishedAt: timestamp("policy_published_at", { withTimezone: true }),
   updatedAt: updatedAt(),
 });
+
+/** Platform-wide key/value settings owned by the MySmartCard super admin (e.g. global portal defaults). */
+export const platformSettings = pgTable("platform_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: updatedAt(),
+});
+
+/** Versions of the super-admin portal policy. `institution_id` null = global defaults. */
+export const portalPolicyHistory = pgTable(
+  "portal_policy_history",
+  {
+    id: id(),
+    institutionId: uuid("institution_id").references(() => institutions.id, { onDelete: "cascade" }),
+    action: text("action").notNull(), // save_draft | publish | discard | rollback
+    policy: jsonb("policy").notNull(),
+    branding: jsonb("branding"),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("pph_inst_idx").on(t.institutionId, t.createdAt)],
+);
 
 export const portalConfigHistory = pgTable(
   "portal_config_history",
@@ -427,6 +454,34 @@ export const timetableEntries = pgTable(
   (t) => [index("tt_section_idx").on(t.institutionId, t.sectionId, t.dayOfWeek)],
 );
 
+/**
+ * Uploaded timetable images. Each targeting column is optional: null means "any",
+ * so a row with only a department applies to every semester and section of it.
+ */
+export const timetableImages = pgTable(
+  "timetable_images",
+  {
+    id: id(),
+    institutionId: tenant(),
+    title: text("title").notNull(),
+    kind: text("kind").notNull().default("class"), // class | exam
+    departmentId: uuid("department_id").references(() => departments.id, { onDelete: "set null" }),
+    programmeId: uuid("programme_id").references(() => programmes.id, { onDelete: "set null" }),
+    semester: integer("semester"),
+    sectionId: uuid("section_id").references(() => sections.id, { onDelete: "set null" }),
+    academicYear: text("academic_year"),
+    /** The current image; earlier versions stay in `files` (owner_type = timetable_image). */
+    fileId: uuid("file_id").notNull(),
+    status: text("status").notNull().default("draft"), // draft | published | archived
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("tt_images_inst_idx").on(t.institutionId, t.status)],
+);
+
 export const calendarEvents = pgTable("calendar_events", {
   id: id(),
   institutionId: tenant(),
@@ -447,7 +502,7 @@ export const files = pgTable(
     id: id(),
     institutionId: tenant(),
     /** What the file belongs to. Download authorization is decided per owner type. */
-    ownerType: text("owner_type").notNull(), // student_photo | student_document | notice | coursework | submission | branding
+    ownerType: text("owner_type").notNull(), // student_photo | student_document | notice | coursework | submission | branding | timetable_image
     ownerId: uuid("owner_id"),
     storageKey: text("storage_key").notNull(),
     originalName: text("original_name").notNull(),
@@ -480,15 +535,41 @@ export const notices = pgTable(
     body: text("body").notNull(),
     category: text("category").notNull(), // general | department | class | exam | holiday | deadline | event | admin | transport | library
     pinned: boolean("pinned").notNull().default(false),
-    status: text("status").notNull().default("draft"), // draft | published
+    status: text("status").notNull().default("draft"), // draft | published | archived
     publishAt: timestamp("publish_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     audience: jsonb("audience").$type<NoticeAudience>().notNull(),
+    /** students | teachers — the two notice boards never mix. */
+    audienceType: text("audience_type").notNull().default("students"),
+    imageFileId: uuid("image_file_id"),
+    imagePosition: text("image_position").notNull().default("center"), // top | center | bottom
+    /** Bumped only for a "major update"; readers who read an older revision see it as unread again. */
+    revision: integer("revision").notNull().default(1),
     notifyEmail: boolean("notify_email").notNull().default(false),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [index("notices_inst_idx").on(t.institutionId, t.status, t.publishAt)],
+);
+
+/** Per-user read receipts, so unread badges persist across sessions and devices. */
+export const noticeReads = pgTable(
+  "notice_reads",
+  {
+    id: id(),
+    institutionId: tenant(),
+    noticeId: uuid("notice_id")
+      .notNull()
+      .references(() => notices.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull().default(1),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("notice_reads_uq").on(t.noticeId, t.userId), index("notice_reads_user_idx").on(t.userId)],
 );
 
 export const notificationOutbox = pgTable("notification_outbox", {
@@ -521,8 +602,11 @@ export const coursework = pgTable(
     dueAt: timestamp("due_at", { withTimezone: true }),
     maxMarks: integer("max_marks"),
     acceptSubmissions: boolean("accept_submissions").notNull().default(false),
+    /** draft | published | archived. Existing rows default to published so nothing disappears. */
+    status: text("status").notNull().default("published"),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [index("coursework_section_idx").on(t.institutionId, t.sectionId)],
 );

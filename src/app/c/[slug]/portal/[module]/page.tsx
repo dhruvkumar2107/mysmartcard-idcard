@@ -21,7 +21,7 @@ export default async function PortalModulePage({ params, searchParams }: SlugPro
   return (
     <PortalShell v={v} base={`/c/${slug}/portal`} active={k} topRight={<SignOut />}>
       <Flash searchParams={flashOf(sp)} />
-      <PortalModule v={v} k={k} q={one(sp.q)} submitAction={submitAssignmentAction} />
+      <PortalModule v={v} k={k} q={one(sp.q)} page={Number(one(sp.page)) || 1} base={`/c/${slug}/portal`} submitAction={submitAssignmentAction} />
     </PortalShell>
   );
 }

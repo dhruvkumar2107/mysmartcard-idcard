@@ -2,7 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { departments, programmes, sections, students } from "@/db/schema";
 import { forbidden } from "@/lib/errors";
-import { moduleVisibleToStudent, orderedModules, type ModuleKey, type PortalConfig } from "@/lib/portal-config";
+import { feature, moduleVisibleToStudent, orderedModules, type ModuleKey, type PortalConfig } from "@/lib/portal-config";
+import { audit } from "../audit";
 import type { TenantContext } from "../context";
 import { studentAttendance } from "./attendance";
 import { examSchedule, publishedResultsForStudent } from "./assessments";
@@ -10,16 +11,18 @@ import { cardsForStudent } from "./cards";
 import { courseworkForStudent } from "./coursework";
 import { studentLedger } from "./finance";
 import { loansForStudent, renewalEligibility } from "./library";
-import { noticesForStudent } from "./notices";
-import { timetableFor, upcomingEvents } from "./timetable";
+import { noticeFeed, noticesForStudent } from "./notices";
+import { upcomingEvents } from "./timetable";
+import { timetableImagesForStudent } from "./timetable-images";
 import { transportForStudent } from "./transport";
 import { owned } from "./guard";
 
 /**
- * A portal "viewer" is either the signed-in student (published config) or an
- * administrator previewing a student with the DRAFT config. Both paths go
- * through the same module gate, so a disabled module is unreachable — not
- * merely hidden.
+ * A portal "viewer" is either the signed-in student (published config), a college
+ * administrator previewing a student (published config, read-only), or the platform
+ * super admin previewing a DRAFT. All paths go through the same module gate and the
+ * same feature-flag stripping, so a hidden module or value is unreachable — not
+ * merely hidden in the UI.
  */
 export type PortalViewer = { ctx: TenantContext; studentId: string; config: PortalConfig; preview: boolean };
 
@@ -28,10 +31,19 @@ export async function viewerForStudent(ctx: TenantContext): Promise<PortalViewer
   return { ctx, studentId: ctx.studentId, config: ctx.portalConfig, preview: false };
 }
 
+/** College staff with portal.configure can see exactly what a student sees (published settings). */
 export async function viewerForPreview(ctx: TenantContext, studentId: string): Promise<PortalViewer> {
   if (!ctx.perms.has("portal.configure")) throw forbidden();
   const s = await owned(ctx, students, studentId, "Student");
-  return { ctx, studentId: s.id, config: ctx.draftConfig, preview: true };
+  return { ctx, studentId: s.id, config: ctx.portalConfig, preview: true };
+}
+
+/** Super-admin preview of a draft configuration, rendered for a real student and audited. */
+export async function viewerForPlatformPreview(ctx: TenantContext, studentId: string, config: PortalConfig): Promise<PortalViewer> {
+  if (!ctx.user.isSuperAdmin) throw forbidden();
+  const s = await owned(ctx, students, studentId, "Student");
+  await audit(ctx, { action: "portal.preview", entityType: "student", entityId: s.id, summary: `Previewed draft student portal as ${s.enrollmentNo}` });
+  return { ctx, studentId: s.id, config, preview: true };
 }
 
 export async function portalStudent(v: PortalViewer) {
@@ -57,7 +69,25 @@ function gate(v: PortalViewer, s: PortalStudent["student"], key: ModuleKey) {
   if (!moduleVisibleToStudent(v.config, key, s)) throw forbidden("This section is not available in your portal.");
 }
 
-export async function loadModule(v: PortalViewer, key: ModuleKey, opts: { q?: string } = {}) {
+/** Remove CGPA/SGPA unless the super admin enabled them. Subject results stay. */
+function stripResults(v: PortalViewer, data: Awaited<ReturnType<typeof publishedResultsForStudent>>) {
+  if (feature(v.config, "showCGPA")) return data;
+  return { ...data, cgpa: null, semesters: data.semesters.map((s) => ({ ...s, sgpa: null })) };
+}
+
+/** Remove due dates unless assignment deadlines are enabled. */
+function stripCoursework(v: PortalViewer, items: Awaited<ReturnType<typeof courseworkForStudent>>) {
+  if (feature(v.config, "showAssignmentDeadlines")) return items;
+  return items.map((i) => ({ ...i, item: { ...i.item, dueAt: null } }));
+}
+
+/** Remove fee due dates / overdue states unless fee reminders are enabled. */
+function stripLedger(v: PortalViewer, ledger: Awaited<ReturnType<typeof studentLedger>>) {
+  if (feature(v.config, "showFeeDueReminders")) return ledger;
+  return { ...ledger, demands: ledger.demands.map((d) => ({ ...d, dueDate: null, status: d.status === "overdue" ? "due" : d.status })) };
+}
+
+export async function loadModule(v: PortalViewer, key: ModuleKey, opts: { q?: string; page?: number } = {}) {
   const me = await portalStudent(v);
   gate(v, me.student, key);
   const ctx = v.ctx;
@@ -69,18 +99,18 @@ export async function loadModule(v: PortalViewer, key: ModuleKey, opts: { q?: st
       return { key, me, data: await studentAttendance(ctx, sid) };
     case "results":
     case "internal_marks":
-      return { key, me, data: await publishedResultsForStudent(ctx, sid) };
+      return { key, me, data: stripResults(v, await publishedResultsForStudent(ctx, sid)) };
     case "timetable": {
       const secIds = me.student.sectionId ? [me.student.sectionId] : [];
-      const [slots, events, exams] = await Promise.all([timetableFor(ctx, { sectionIds: secIds }), upcomingEvents(ctx, me.student.sectionId, 20), examSchedule(ctx, secIds)]);
-      return { key, me, slots, events, exams };
+      const [images, events, exams] = await Promise.all([timetableImagesForStudent(ctx, me.student), upcomingEvents(ctx, me.student.sectionId, 20), examSchedule(ctx, secIds)]);
+      return { key, me, images, events, exams };
     }
     case "notices":
-      return { key, me, notices: await noticesForStudent(ctx, me.student, opts.q) };
+      return { key, me, feed: await noticeFeed(ctx, { kind: "student", student: me.student }, { q: opts.q, page: opts.page }) };
     case "coursework":
-      return { key, me, items: await courseworkForStudent(ctx, me.student) };
+      return { key, me, items: stripCoursework(v, await courseworkForStudent(ctx, me.student)) };
     case "fees":
-      return { key, me, ledger: await studentLedger(ctx, sid) };
+      return { key, me, ledger: stripLedger(v, await studentLedger(ctx, sid)) };
     case "library": {
       const loans = await loansForStudent(ctx, sid);
       const notices = (await noticesForStudent(ctx, me.student)).filter((n) => n.category === "library").slice(0, 5);
@@ -94,18 +124,24 @@ export async function loadModule(v: PortalViewer, key: ModuleKey, opts: { q?: st
   }
 }
 
-/** Compact data for the portal home. Each tile only loads if its module is visible. */
+/**
+ * Compact data for the portal home. Each value is only loaded when its module AND
+ * its data flag are enabled; otherwise it is null and never reaches the page.
+ */
 export async function portalHome(v: PortalViewer) {
   const me = await portalStudent(v);
   const mods = visibleModules(v, me.student);
   const has = (k: ModuleKey) => mods.includes(k);
   const ctx = v.ctx;
-  const [attendance, results, fees, notices, coursework] = await Promise.all([
+  const showCgpa = has("results") && feature(v.config, "showCGPA");
+  const showDue = has("coursework") && feature(v.config, "showAssignmentDeadlines");
+  const [attendance, results, fees, feed, coursework, timetables] = await Promise.all([
     has("attendance") ? studentAttendance(ctx, me.student.id) : null,
-    has("results") ? publishedResultsForStudent(ctx, me.student.id) : null,
+    showCgpa ? publishedResultsForStudent(ctx, me.student.id) : null,
     has("fees") ? studentLedger(ctx, me.student.id) : null,
-    has("notices") ? noticesForStudent(ctx, me.student) : null,
+    has("notices") ? noticeFeed(ctx, { kind: "student", student: me.student }, { pageSize: 4 }) : null,
     has("coursework") ? courseworkForStudent(ctx, me.student) : null,
+    has("timetable") ? timetableImagesForStudent(ctx, me.student) : null,
   ]);
   const now = Date.now();
   return {
@@ -115,7 +151,11 @@ export async function portalHome(v: PortalViewer) {
     threshold: attendance?.threshold ?? null,
     cgpa: results?.cgpa ?? null,
     balance: fees?.balance ?? null,
-    notices: notices?.slice(0, 3) ?? null,
-    dueAssignments: coursework?.filter((c) => c.item.kind === "assignment" && !c.submission && c.item.dueAt && c.item.dueAt.getTime() > now).length ?? null,
+    notices: feed?.items ?? null,
+    unreadNotices: feed?.unread ?? null,
+    assignments: coursework?.length ?? null,
+    latestAssignment: coursework?.[0] ? { title: coursework[0].item.title, subject: coursework[0].subjectCode } : null,
+    timetable: timetables?.[0] ? { title: timetables[0].t.title, updatedAt: timetables[0].t.updatedAt } : null,
+    dueAssignments: showDue ? (coursework?.filter((c) => c.item.kind === "assignment" && !c.submission && c.item.dueAt && c.item.dueAt.getTime() > now).length ?? null) : null,
   };
 }

@@ -17,6 +17,9 @@ export default async function PlatformLayout({ children }: { children: ReactNode
             <Link href="/platform" className="text-muted hover:text-ink">
               Colleges
             </Link>
+            <Link href="/platform/portal" className="text-muted hover:text-ink">
+              Portal Builder
+            </Link>
             <Link href="/platform/audit" className="text-muted hover:text-ink">
               Audit
             </Link>

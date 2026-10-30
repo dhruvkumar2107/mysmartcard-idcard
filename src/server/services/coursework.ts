@@ -1,9 +1,9 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ref } from "@/db/sql";
-import { getDb } from "@/db";
-import { coursework, files, programmes, sections, students, subjects, submissions } from "@/db/schema";
-import { badRequest, forbidden } from "@/lib/errors";
+import { getDb, type Executor } from "@/db";
+import { coursework, files, programmes, sections, students, subjects, submissions, users } from "@/db/schema";
+import { badRequest, forbidden, notFound } from "@/lib/errors";
 import { newStorageKey, storage, validateUpload } from "@/lib/storage";
 import { audit } from "../audit";
 import { assertAdminWrite, assertWritable, type TenantContext } from "../context";
@@ -21,34 +21,114 @@ const input = z.object({
   kind: z.enum(["assignment", "material"]),
   title: z.string().trim().min(2).max(200),
   instructions: z.string().max(5000).nullable(),
+  /** Optional admin record. Students only see it if the super admin enables assignment deadlines. */
   dueAt: z.date().nullable(),
   maxMarks: z.number().int().min(1).max(1000).nullable(),
   acceptSubmissions: z.boolean(),
+  status: z.enum(["draft", "published"]).default("published"),
 });
+export type CourseworkInput = z.input<typeof input>;
 
-export async function createCoursework(ctx: TenantContext, data: z.input<typeof input>, attachment?: File | null) {
+const MAX_IMAGES = 12;
+
+async function storeCourseworkFile(ctx: TenantContext, courseworkId: string, up: Awaited<ReturnType<typeof validateUpload>>, tx: Executor = getDb()) {
+  const key = newStorageKey(ctx.institution.id, "coursework");
+  await storage().put(key, up.buffer);
+  await tx.insert(files).values({ institutionId: ctx.institution.id, ownerType: "coursework", ownerId: courseworkId, storageKey: key, originalName: up.name, mimeType: up.mimeType, sizeBytes: up.buffer.length, uploadedByUserId: ctx.user.id });
+}
+
+const realFiles = (fs?: (File | null)[] | null) => (fs ?? []).filter((f): f is File => !!f && f.size > 0);
+
+export async function createCoursework(ctx: TenantContext, data: CourseworkInput, attachment?: File | null, images?: File[]) {
   assertAdminWrite(ctx, "coursework.manage");
   const d = input.parse(data);
   const subj = await owned(ctx, subjects, d.subjectId, "Subject");
   const sec = await owned(ctx, sections, d.sectionId, "Section");
   if (!canManage(ctx, subj, sec.id)) throw forbidden("You can only publish coursework for classes you teach.");
-  if (d.kind === "assignment" && !d.dueAt) throw badRequest("Assignments need a due date.");
+  const imgs = realFiles(images);
+  if (imgs.length > MAX_IMAGES) throw badRequest(`Upload at most ${MAX_IMAGES} images per assignment.`);
+  // Validate every upload before writing anything.
+  const imageUploads = await Promise.all(imgs.map((f) => validateUpload(f, "photo")));
   const upload = attachment && attachment.size > 0 ? await validateUpload(attachment, "document") : null;
-  if (d.kind === "material" && !upload && !d.instructions) throw badRequest("Attach a file or add notes for study material.");
+  if (!upload && !imageUploads.length && !d.instructions) throw badRequest(d.kind === "assignment" ? "Add at least one assignment image." : "Attach a file or add notes for study material.");
   const db = getDb();
   return db.transaction(async (tx) => {
     const [row] = await tx
       .insert(coursework)
       .values({ ...d, acceptSubmissions: d.kind === "assignment" && d.acceptSubmissions, institutionId: ctx.institution.id, createdByUserId: ctx.user.id })
       .returning();
-    if (upload) {
-      const key = newStorageKey(ctx.institution.id, "coursework");
-      await storage().put(key, upload.buffer);
-      await tx.insert(files).values({ institutionId: ctx.institution.id, ownerType: "coursework", ownerId: row.id, storageKey: key, originalName: upload.name, mimeType: upload.mimeType, sizeBytes: upload.buffer.length, uploadedByUserId: ctx.user.id });
-    }
-    await audit(ctx, { action: "coursework.create", entityType: "coursework", entityId: row.id, summary: `Published ${d.kind} "${row.title}" for ${subj.code}` }, tx);
+    for (const up of [...imageUploads, ...(upload ? [upload] : [])]) await storeCourseworkFile(ctx, row.id, up, tx);
+    await audit(ctx, { action: d.status === "published" ? "coursework.create" : "coursework.draft", entityType: "coursework", entityId: row.id, summary: `${d.status === "published" ? "Published" : "Drafted"} ${d.kind} "${row.title}" for ${subj.code}${imageUploads.length ? ` with ${imageUploads.length} image(s)` : ""}` }, tx);
     return row;
   });
+}
+
+async function manageableCoursework(ctx: TenantContext, id: string) {
+  const cw = await owned(ctx, coursework, id, "Assignment");
+  const subj = await owned(ctx, subjects, cw.subjectId, "Subject");
+  if (!canManage(ctx, subj, cw.sectionId)) throw forbidden();
+  return { cw, subj };
+}
+
+export async function updateCoursework(ctx: TenantContext, id: string, data: { title: string; instructions: string | null; dueAt: Date | null; maxMarks: number | null }) {
+  assertAdminWrite(ctx, "coursework.manage");
+  const { cw } = await manageableCoursework(ctx, id);
+  const d = input.pick({ title: true, instructions: true, dueAt: true, maxMarks: true }).parse(data);
+  await getDb().update(coursework).set({ ...d, updatedAt: new Date() }).where(and(eq(coursework.id, cw.id), eq(coursework.institutionId, ctx.institution.id)));
+  await audit(ctx, { action: "coursework.update", entityType: "coursework", entityId: cw.id, summary: `Edited "${d.title}"` });
+}
+
+export async function addCourseworkImages(ctx: TenantContext, id: string, images: File[]) {
+  assertAdminWrite(ctx, "coursework.manage");
+  const { cw } = await manageableCoursework(ctx, id);
+  const imgs = realFiles(images);
+  if (!imgs.length) throw badRequest("Choose at least one image.");
+  const [{ n }] = await getDb().select({ n: sql<number>`count(*)::int` }).from(files).where(and(eq(files.institutionId, ctx.institution.id), eq(files.ownerType, "coursework"), eq(files.ownerId, cw.id)));
+  if (n + imgs.length > MAX_IMAGES) throw badRequest(`An assignment can have at most ${MAX_IMAGES} files.`);
+  const ups = await Promise.all(imgs.map((f) => validateUpload(f, "photo")));
+  for (const up of ups) await storeCourseworkFile(ctx, cw.id, up);
+  await getDb().update(coursework).set({ updatedAt: new Date() }).where(eq(coursework.id, cw.id));
+  await audit(ctx, { action: "coursework.images_add", entityType: "coursework", entityId: cw.id, summary: `Added ${ups.length} image(s) to "${cw.title}"` });
+}
+
+export async function removeCourseworkFile(ctx: TenantContext, id: string, fileId: string) {
+  assertAdminWrite(ctx, "coursework.manage");
+  const { cw } = await manageableCoursework(ctx, id);
+  const f = await owned(ctx, files, fileId, "File");
+  if (f.ownerType !== "coursework" || f.ownerId !== cw.id) throw notFound("File");
+  await getDb().delete(files).where(eq(files.id, f.id));
+  await storage().remove(f.storageKey);
+  await audit(ctx, { action: "coursework.file_remove", entityType: "coursework", entityId: cw.id, summary: `Removed ${f.originalName} from "${cw.title}"` });
+}
+
+export async function setCourseworkStatus(ctx: TenantContext, id: string, action: "publish" | "unpublish" | "archive" | "delete") {
+  assertAdminWrite(ctx, "coursework.manage");
+  const { cw } = await manageableCoursework(ctx, id);
+  const where = and(eq(coursework.id, cw.id), eq(coursework.institutionId, ctx.institution.id));
+  if (action === "delete") {
+    // Submitted work is part of the academic record: archive instead of deleting.
+    const [{ n }] = await getDb().select({ n: sql<number>`count(*)::int` }).from(submissions).where(eq(submissions.courseworkId, cw.id));
+    if (n > 0) throw badRequest("Students have submitted work for this assignment. Archive it instead of deleting.");
+    const own = await getDb().select().from(files).where(and(eq(files.institutionId, ctx.institution.id), eq(files.ownerType, "coursework"), eq(files.ownerId, cw.id)));
+    await getDb().delete(coursework).where(where);
+    await getDb().delete(files).where(and(eq(files.institutionId, ctx.institution.id), eq(files.ownerType, "coursework"), eq(files.ownerId, cw.id)));
+    await Promise.all(own.map((f) => storage().remove(f.storageKey)));
+  } else {
+    const status = action === "publish" ? "published" : action === "archive" ? "archived" : "draft";
+    await getDb().update(coursework).set({ status, updatedAt: new Date() }).where(where);
+  }
+  await audit(ctx, { action: `coursework.${action}`, entityType: "coursework", entityId: cw.id, summary: `${action} "${cw.title}"` });
+}
+
+/** Admin detail: the item, its class, files and who published it. */
+export async function courseworkDetail(ctx: TenantContext, id: string) {
+  const { cw, subj } = await manageableCoursework(ctx, id);
+  const [[sec], attachments, [author]] = await Promise.all([
+    getDb().select({ semester: sections.semester, name: sections.name, programmeCode: programmes.code }).from(sections).innerJoin(programmes, eq(programmes.id, sections.programmeId)).where(eq(sections.id, cw.sectionId)),
+    getDb().select().from(files).where(and(eq(files.institutionId, ctx.institution.id), eq(files.ownerType, "coursework"), eq(files.ownerId, cw.id))).orderBy(asc(files.createdAt)),
+    cw.createdByUserId ? getDb().select({ name: users.name }).from(users).where(eq(users.id, cw.createdByUserId)) : Promise.resolve([] as { name: string }[]),
+  ]);
+  return { coursework: cw, subject: subj, section: sec, attachments, author: author?.name ?? null };
 }
 
 export async function listCourseworkForStaff(ctx: TenantContext) {
@@ -62,6 +142,8 @@ export async function listCourseworkForStaff(ctx: TenantContext) {
       programmeCode: programmes.code,
       submissions: sql<number>`(select count(*)::int from ${submissions} s where s.coursework_id = ${ref(coursework.id)})`,
       attachments: sql<number>`(select count(*)::int from ${files} f where f.owner_type = 'coursework' and f.owner_id = ${ref(coursework.id)})`,
+      images: sql<number>`(select count(*)::int from ${files} f where f.owner_type = 'coursework' and f.owner_id = ${ref(coursework.id)} and f.mime_type like 'image/%')`,
+      cover: sql<string | null>`(select f.id from ${files} f where f.owner_type = 'coursework' and f.owner_id = ${ref(coursework.id)} and f.mime_type like 'image/%' order by f.created_at limit 1)`,
     })
     .from(coursework)
     .innerJoin(subjects, eq(subjects.id, coursework.subjectId))
@@ -103,15 +185,16 @@ export async function courseworkForStudent(ctx: TenantContext, student: { id: st
   if (!student.sectionId) return [];
   const db = getDb();
   const items = await db
-    .select({ item: coursework, subjectCode: subjects.code, subjectName: subjects.name })
+    .select({ item: coursework, subjectCode: subjects.code, subjectName: subjects.name, publisher: users.name })
     .from(coursework)
     .innerJoin(subjects, eq(subjects.id, coursework.subjectId))
-    .where(and(eq(coursework.institutionId, ctx.institution.id), eq(coursework.sectionId, student.sectionId)))
+    .leftJoin(users, eq(users.id, coursework.createdByUserId))
+    .where(and(eq(coursework.institutionId, ctx.institution.id), eq(coursework.sectionId, student.sectionId), eq(coursework.status, "published")))
     .orderBy(desc(coursework.createdAt));
   if (!items.length) return [];
   const ids = items.map((i) => i.item.id);
   const [atts, subs] = await Promise.all([
-    db.select({ id: files.id, ownerId: files.ownerId, name: files.originalName, size: files.sizeBytes }).from(files).where(and(eq(files.institutionId, ctx.institution.id), eq(files.ownerType, "coursework"), inArray(files.ownerId, ids))),
+    db.select({ id: files.id, ownerId: files.ownerId, name: files.originalName, size: files.sizeBytes, mimeType: files.mimeType }).from(files).where(and(eq(files.institutionId, ctx.institution.id), eq(files.ownerType, "coursework"), inArray(files.ownerId, ids))).orderBy(asc(files.createdAt)),
     db.select().from(submissions).where(and(eq(submissions.studentId, student.id), inArray(submissions.courseworkId, ids))),
   ]);
   return items.map((i) => ({ ...i, attachments: atts.filter((a) => a.ownerId === i.item.id), submission: subs.find((s) => s.courseworkId === i.item.id) ?? null }));
@@ -122,7 +205,7 @@ export async function submitAssignment(ctx: TenantContext, courseworkId: string,
   if (ctx.role !== "student" || !ctx.studentId) throw forbidden();
   const cw = await owned(ctx, coursework, courseworkId, "Assignment");
   const [me] = await getDb().select().from(students).where(and(eq(students.id, ctx.studentId), eq(students.institutionId, ctx.institution.id))).limit(1);
-  if (!me || me.sectionId !== cw.sectionId) throw forbidden("This assignment is not for your class.");
+  if (!me || me.sectionId !== cw.sectionId || cw.status !== "published") throw forbidden("This assignment is not for your class.");
   if (!cw.acceptSubmissions) throw badRequest("This assignment does not accept online submissions.");
   if (cw.dueAt && cw.dueAt < new Date()) throw badRequest("The submission deadline has passed.");
   const [existing] = await getDb().select().from(submissions).where(and(eq(submissions.courseworkId, cw.id), eq(submissions.studentId, me.id))).limit(1);

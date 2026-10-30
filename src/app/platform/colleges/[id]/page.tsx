@@ -1,13 +1,12 @@
-import { Badge, Card, Checkbox, Field, Flash, Input, KV, PageHeader, Select, Stat, StatusBadge } from "@/components/ui";
+import { Badge, Card, Checkbox, Field, Flash, Input, KV, LinkButton, PageHeader, Select, Stat, StatusBadge } from "@/components/ui";
 import { CopyButton, SubmitButton } from "@/components/client";
 import { MODULES } from "@/lib/portal-config";
 import { formatDateTime } from "@/lib/format";
 import { flashOf, type Props } from "@/lib/page";
 import { orNotFound, requireSuperAdmin } from "@/server/session";
 import { getInstitution } from "@/server/services/platform";
-import { hasActiveSupportGrant } from "@/server/services/settings";
 import { appUrl } from "@/server/services/cards";
-import { addCollegeAdminAction, resetAdminPasswordAction, setInstitutionStatusAction, updateInstitutionDetailsAction, updateSubscriptionAction } from "@/server/actions/platform";
+import { addCollegeAdminAction, enterWorkspaceAction, resetAdminPasswordAction, setInstitutionStatusAction, updateInstitutionDetailsAction, updateSubscriptionAction } from "@/server/actions/platform";
 import { OneTimeCredential } from "@/components/server-bits";
 
 export const metadata = { title: "College" };
@@ -16,12 +15,26 @@ export default async function CollegeDetail({ params, searchParams }: Props<{ id
   const { id } = await params;
   const user = await requireSuperAdmin();
   const { inst, admins, usage } = await orNotFound(getInstitution(user, id));
-  const support = await hasActiveSupportGrant(inst.id);
   const back = `/platform/colleges/${id}`;
   const loginUrl = `${appUrl()}/login?next=${encodeURIComponent(`/c/${inst.slug}/admin`)}`;
   return (
     <>
-      <PageHeader title={inst.name} description={`/c/${inst.slug}`} back={{ href: "/platform", label: "Platform" }} actions={<StatusBadge status={inst.status} />} />
+      <PageHeader
+        title={inst.name}
+        description={`/c/${inst.slug}`}
+        back={{ href: "/platform", label: "Platform" }}
+        actions={
+          <>
+            <StatusBadge status={inst.status} />
+            <LinkButton href={`/platform/portal?college=${inst.id}`}>Portal Builder</LinkButton>
+            <form action={enterWorkspaceAction}>
+              <input type="hidden" name="_back" value={back} />
+              <input type="hidden" name="id" value={inst.id} />
+              <SubmitButton>Open college workspace</SubmitButton>
+            </form>
+          </>
+        }
+      />
       <Flash searchParams={flashOf(await searchParams)} />
       <OneTimeCredential />
 
@@ -107,7 +120,7 @@ export default async function CollegeDetail({ params, searchParams }: Props<{ id
             <KV
               items={[
                 ["Created", formatDateTime(inst.createdAt)],
-                ["Support access", support ? "Granted (read-only)" : "Not granted. College records are not visible to platform staff"],
+                ["Platform access", "Super admin (audited in the college log)"],
               ]}
             />
           </div>

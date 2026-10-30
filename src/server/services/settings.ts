@@ -1,71 +1,34 @@
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLogs, files, institutionSettings, portalConfigHistory, supportGrants, users } from "@/db/schema";
+import { auditLogs, institutionSettings, portalConfigHistory, supportGrants, users } from "@/db/schema";
 import { badRequest } from "@/lib/errors";
 import { PERMISSIONS, ROLES, DEFAULT_ROLE_PERMISSIONS, type Role } from "@/lib/permissions";
-import { academicSettingsSchema, normalizeConfig, portalConfigSchema, type AcademicSettings, type PortalConfig } from "@/lib/portal-config";
-import { newStorageKey, storage, validateUpload } from "@/lib/storage";
+import { academicSettingsSchema, normalizeConfig, PUBLIC_FIELDS, type AcademicSettings } from "@/lib/portal-config";
 import { audit } from "../audit";
 import { assertAdminWrite, assertCan, type TenantContext } from "../context";
 import { ownedOrNull } from "./guard";
 
-export async function saveDraftConfig(ctx: TenantContext, cfg: PortalConfig) {
+/**
+ * College admins choose which fields the public NFC tap page shows (a privacy decision
+ * that belongs to the college). Everything else about the student portal — modules,
+ * order, data flags and branding — is owned by the MySmartCard super admin
+ * (see services/portal-builder.ts). Applied immediately to draft and published config.
+ */
+export async function savePublicFields(ctx: TenantContext, fields: string[]) {
   assertAdminWrite(ctx, "portal.configure");
-  const parsed = portalConfigSchema.parse(cfg);
-  if (parsed.branding.logoFileId) {
-    const f = await ownedOrNull(ctx, files, parsed.branding.logoFileId, "Logo");
-    if (f?.ownerType !== "branding") throw badRequest("Invalid logo.");
-  }
-  const normalized = normalizeConfig(parsed, ctx.institution.licensedModules);
+  const publicFields = [...new Set(fields)].filter((f) => PUBLIC_FIELDS.some((p) => p.key === f));
   const db = getDb();
   await db.transaction(async (tx) => {
-    await tx.update(institutionSettings).set({ draftConfig: normalized, updatedAt: new Date() }).where(eq(institutionSettings.institutionId, ctx.institution.id));
-    await tx.insert(portalConfigHistory).values({ institutionId: ctx.institution.id, action: "save_draft", config: normalized, actorUserId: ctx.user.id });
-    await audit(ctx, { action: "portal.save_draft", entityType: "portal_config", summary: "Saved portal draft configuration" }, tx);
+    const [row] = await tx.select().from(institutionSettings).where(eq(institutionSettings.institutionId, ctx.institution.id)).limit(1);
+    const lic = ctx.institution.licensedModules;
+    const draft = { ...normalizeConfig(row?.draftConfig, lic), publicFields };
+    const published = { ...normalizeConfig(row?.publishedConfig, lic), publicFields };
+    delete draft.features;
+    delete published.features;
+    await tx.update(institutionSettings).set({ draftConfig: draft, publishedConfig: published, updatedAt: new Date() }).where(eq(institutionSettings.institutionId, ctx.institution.id));
+    await tx.insert(portalConfigHistory).values({ institutionId: ctx.institution.id, action: "public_fields", config: published, actorUserId: ctx.user.id });
+    await audit(ctx, { action: "portal.public_fields", entityType: "portal_config", summary: `Updated NFC tap-page fields (${publicFields.length} shown)`, metadata: { publicFields } }, tx);
   });
-}
-
-export async function publishConfig(ctx: TenantContext) {
-  assertAdminWrite(ctx, "portal.configure");
-  const db = getDb();
-  await db.transaction(async (tx) => {
-    await tx
-      .update(institutionSettings)
-      .set({ publishedConfig: ctx.draftConfig, publishedAt: new Date(), updatedAt: new Date() })
-      .where(eq(institutionSettings.institutionId, ctx.institution.id));
-    await tx.insert(portalConfigHistory).values({ institutionId: ctx.institution.id, action: "publish", config: ctx.draftConfig, actorUserId: ctx.user.id });
-    const enabled = Object.entries(ctx.draftConfig.modules).filter(([, m]) => m.enabled).map(([k]) => k);
-    await audit(ctx, { action: "portal.publish", entityType: "portal_config", summary: `Published portal configuration (${enabled.length} modules enabled)`, metadata: { enabled, publicFields: ctx.draftConfig.publicFields } }, tx);
-  });
-}
-
-export async function discardDraft(ctx: TenantContext) {
-  assertAdminWrite(ctx, "portal.configure");
-  await getDb().update(institutionSettings).set({ draftConfig: ctx.portalConfig }).where(eq(institutionSettings.institutionId, ctx.institution.id));
-  await getDb().insert(portalConfigHistory).values({ institutionId: ctx.institution.id, action: "discard", config: ctx.portalConfig, actorUserId: ctx.user.id });
-}
-
-export async function configHistory(ctx: TenantContext) {
-  assertCan(ctx, "portal.configure");
-  return getDb()
-    .select({ entry: portalConfigHistory, actor: users.name })
-    .from(portalConfigHistory)
-    .leftJoin(users, eq(users.id, portalConfigHistory.actorUserId))
-    .where(eq(portalConfigHistory.institutionId, ctx.institution.id))
-    .orderBy(desc(portalConfigHistory.createdAt))
-    .limit(50);
-}
-
-export async function uploadLogo(ctx: TenantContext, file: File) {
-  assertAdminWrite(ctx, "portal.configure");
-  const up = await validateUpload(file, "image");
-  const key = newStorageKey(ctx.institution.id, "branding");
-  await storage().put(key, up.buffer);
-  const [f] = await getDb()
-    .insert(files)
-    .values({ institutionId: ctx.institution.id, ownerType: "branding", ownerId: ctx.institution.id, storageKey: key, originalName: up.name, mimeType: up.mimeType, sizeBytes: up.buffer.length, uploadedByUserId: ctx.user.id })
-    .returning();
-  await saveDraftConfig(ctx, { ...ctx.draftConfig, branding: { ...ctx.draftConfig.branding, logoFileId: f.id } });
 }
 
 export async function saveAcademicSettings(ctx: TenantContext, settings: AcademicSettings) {

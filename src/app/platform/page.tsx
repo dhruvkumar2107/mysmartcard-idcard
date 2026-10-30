@@ -1,21 +1,20 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { Badge, Card, Flash, LinkButton, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/ui";
-import { formatDateTime } from "@/lib/format";
 import { flashOf, type Props } from "@/lib/page";
 import { requireSuperAdmin } from "@/server/session";
-import { activeSupportGrants, listInstitutions, platformStats } from "@/server/services/platform";
+import { listInstitutions, platformStats } from "@/server/services/platform";
 
 export const metadata = { title: "Platform" };
 
 export default async function PlatformHome({ searchParams }: Props) {
   const user = await requireSuperAdmin();
-  const [stats, rows, grants] = await Promise.all([platformStats(user), listInstitutions(user), activeSupportGrants(user)]);
+  const [stats, rows] = await Promise.all([platformStats(user), listInstitutions(user)]);
   return (
     <>
       <PageHeader
         title="Platform administration"
-        description="Colleges are fully isolated tenants. Platform staff see aggregate counts only; entering a college requires a support grant issued by that college."
+        description="Colleges are isolated tenants. As super admin you can open any college workspace and configure every student portal; each access and change is recorded in that college’s audit log."
         actions={
           <LinkButton href="/platform/colleges/new" variant="primary">
             <Plus className="h-4 w-4" aria-hidden /> Onboard college
@@ -71,23 +70,6 @@ export default async function PlatformHome({ searchParams }: Props) {
             ))}
           </tbody>
         </Table>
-      </Card>
-      <Card title="Active support grants" className="mt-6" padded={false}>
-        {grants.length === 0 ? (
-          <p className="px-5 py-4 text-sm text-muted">No college has granted support access right now.</p>
-        ) : (
-          <ul className="divide-y divide-line text-sm">
-            {grants.map((g) => (
-              <li key={g.grant.id} className="flex items-center justify-between px-5 py-3">
-                <span>
-                  <span className="font-medium">{g.institution.name}</span> — {g.grant.reason}
-                  <span className="block text-xs text-muted">until {formatDateTime(g.grant.expiresAt)}</span>
-                </span>
-                <LinkButton href={`/c/${g.institution.slug}/admin`}>Enter (read-only)</LinkButton>
-              </li>
-            ))}
-          </ul>
-        )}
       </Card>
     </>
   );

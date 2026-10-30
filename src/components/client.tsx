@@ -12,8 +12,11 @@ export function SubmitButton({
   name,
   value,
   className,
+  pendingLabel,
 }: {
   children: ReactNode;
+  /** Text shown while the form is submitting (e.g. "Uploading…"). */
+  pendingLabel?: string;
   variant?: keyof typeof buttonStyles;
   /** Ask for confirmation before submitting (destructive / bulk actions). */
   confirm?: string;
@@ -21,7 +24,9 @@ export function SubmitButton({
   value?: string;
   className?: string;
 }) {
-  const { pending } = useFormStatus();
+  const { pending, data } = useFormStatus();
+  // With several submit buttons in one form, only the one that was pressed shows progress.
+  const mine = pending && (!name || !data || data.get(name) === (value ?? ""));
   return (
     <button
       type="submit"
@@ -34,8 +39,8 @@ export function SubmitButton({
       }}
       className={cn(buttonBase, buttonStyles[variant], className)}
     >
-      {pending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-      {children}
+      {mine && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+      {mine && pendingLabel ? pendingLabel : children}
     </button>
   );
 }

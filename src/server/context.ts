@@ -1,9 +1,9 @@
-import { and, eq, gt, isNull, inArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
-import { classAssignments, faculty, institutions, institutionSettings, memberships, students, supportGrants } from "@/db/schema";
+import { classAssignments, faculty, institutions, institutionSettings, memberships, platformSettings, students } from "@/db/schema";
 import { forbidden, notFound } from "@/lib/errors";
-import { isRole, resolvePermissions, scopeForRole, type DataScope, type Permission, type Role } from "@/lib/permissions";
-import { normalizeAcademic, normalizeConfig, type AcademicSettings, type PortalConfig } from "@/lib/portal-config";
+import { DEFAULT_ROLE_PERMISSIONS, isRole, resolvePermissions, scopeForRole, type DataScope, type Permission, type Role } from "@/lib/permissions";
+import { applyPolicy, normalizeAcademic, normalizeConfig, normalizePolicy, resolvePolicy, type AcademicSettings, type PortalConfig, type PortalPolicy } from "@/lib/portal-config";
 import type { SessionUser } from "./auth";
 
 export type Institution = typeof institutions.$inferSelect;
@@ -21,15 +21,25 @@ export type TenantContext = {
   classes: { id: string; subjectId: string; sectionId: string }[];
   /** Present for student accounts. */
   studentId: string | null;
-  /** Super admin acting under a college-issued support grant (read-only). */
+  /** Legacy read-only support session. Always false now that platform admins have audited full access. */
   viaSupport: boolean;
+  /** MySmartCard super admin managing this college (full access, every write audited as platform). */
+  viaPlatform: boolean;
   portalConfig: PortalConfig;
   draftConfig: PortalConfig;
   academic: AcademicSettings;
   permissionOverrides: Record<string, Record<string, boolean>>;
 };
 
-const SUPPORT_PERMISSIONS: Permission[] = ["dashboard.view", "reports.view", "students.view", "faculty.view", "attendance.view_all", "audit.view"];
+export const GLOBAL_POLICY_KEYS = { draft: "portal_defaults.draft", published: "portal_defaults.published" } as const;
+
+/** Global portal defaults set by the super admin (draft + published layers). */
+export async function loadGlobalPolicy(): Promise<{ draft: PortalPolicy; published: PortalPolicy }> {
+  const rows = await getDb().select().from(platformSettings).where(inArray(platformSettings.key, Object.values(GLOBAL_POLICY_KEYS)));
+  const get = (k: string) => normalizePolicy(rows.find((r) => r.key === k)?.value);
+  const published = get(GLOBAL_POLICY_KEYS.published);
+  return { published, draft: rows.some((r) => r.key === GLOBAL_POLICY_KEYS.draft) ? get(GLOBAL_POLICY_KEYS.draft) : published };
+}
 
 /**
  * Resolve the caller's rights inside a college. This is THE tenant boundary:
@@ -44,11 +54,13 @@ export async function loadTenantContext(user: TenantContext["user"], slug: strin
 
   const [settings] = await db.select().from(institutionSettings).where(eq(institutionSettings.institutionId, inst.id)).limit(1);
   const overrides = (settings?.permissionOverrides ?? {}) as Record<string, Record<string, boolean>>;
+  const global = await loadGlobalPolicy();
   const base = {
     user: { id: user.id, name: user.name, email: user.email, isSuperAdmin: user.isSuperAdmin },
     institution: inst,
-    portalConfig: normalizeConfig(settings?.publishedConfig, inst.licensedModules),
-    draftConfig: normalizeConfig(settings?.draftConfig, inst.licensedModules),
+    // Students always get: college branding/restrictions + published global defaults + published college override.
+    portalConfig: applyPolicy(normalizeConfig(settings?.publishedConfig, inst.licensedModules), resolvePolicy(global.published, normalizePolicy(settings?.policyPublished)), inst.licensedModules),
+    draftConfig: applyPolicy(normalizeConfig(settings?.draftConfig, inst.licensedModules), resolvePolicy(global.published, normalizePolicy(settings?.policyDraft)), inst.licensedModules),
     academic: normalizeAcademic(settings?.academic),
     permissionOverrides: overrides,
   };
@@ -60,25 +72,21 @@ export async function loadTenantContext(user: TenantContext["user"], slug: strin
     .limit(1);
 
   if (!m) {
+    // The MySmartCard super admin can manage every college. Access is not read-only, but every
+    // write is attributed to the platform in the college's audit log (see audit()).
     if (user.isSuperAdmin) {
-      const [grant] = await db
-        .select({ id: supportGrants.id })
-        .from(supportGrants)
-        .where(and(eq(supportGrants.institutionId, inst.id), gt(supportGrants.expiresAt, new Date()), isNull(supportGrants.revokedAt)))
-        .limit(1);
-      if (grant) {
-        return {
-          ...base,
-          role: "college_admin",
-          departmentId: null,
-          perms: new Set(SUPPORT_PERMISSIONS),
-          scope: { kind: "all" },
-          facultyId: null,
-          classes: [],
-          studentId: null,
-          viaSupport: true,
-        };
-      }
+      return {
+        ...base,
+        role: "college_admin",
+        departmentId: null,
+        perms: new Set(DEFAULT_ROLE_PERMISSIONS.college_admin),
+        scope: { kind: "all" },
+        facultyId: null,
+        classes: [],
+        studentId: null,
+        viaSupport: false,
+        viaPlatform: true,
+      };
     }
     throw forbidden("You are not a member of this college.");
   }
@@ -120,6 +128,7 @@ export async function loadTenantContext(user: TenantContext["user"], slug: strin
     classes,
     studentId,
     viaSupport: false,
+    viaPlatform: false,
   };
 }
 

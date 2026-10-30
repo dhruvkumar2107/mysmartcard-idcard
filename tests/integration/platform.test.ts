@@ -25,6 +25,7 @@ import * as portal from "@/server/services/portal";
 import * as notices from "@/server/services/notices";
 import * as library from "@/server/services/library";
 import * as timetable from "@/server/services/timetable";
+import * as builder from "@/server/services/portal-builder";
 import { getInstitution, setInstitutionStatus, updateInstitutionDetails } from "@/server/services/platform";
 import { runRetention } from "@/server/services/maintenance";
 import { rateLimit, resetRateLimits } from "@/lib/rate-limit";
@@ -128,7 +129,7 @@ describe("role-based access", () => {
     expect(res.rows.every((r) => r.student.dateOfBirth === null && r.student.address === null)).toBe(true);
     await expectDenied(students.createStudent(f, {} as never));
     await expectDenied(cards.listCards(f, {}));
-    await expectDenied(settings.publishConfig(f));
+    await expectDenied(settings.savePublicFields(f, ["fullName"]));
   });
 
   it("scopes HOD to their own department", async () => {
@@ -147,18 +148,20 @@ describe("role-based access", () => {
     await expectDenied(attendance.attendanceSheet(f, notMine.id, "2026-01-05", 1));
   });
 
-  it("support access requires a college grant and is read-only", async () => {
+  it("the platform super admin can manage any college, and every write is attributed to the platform", async () => {
     const [sa] = await getDb().select().from(schema.users).where(eq(schema.users.email, "platform@mysmartcard.test"));
-    await expectDenied(loadTenantContext(sa, "riverside"));
-    await settings.grantSupport(B, 1, "Ticket 42 – import help");
     const sup = await loadTenantContext(sa, "riverside");
-    expect(sup.viaSupport).toBe(true);
+    expect(sup.viaPlatform).toBe(true);
+    expect(sup.viaSupport).toBe(false);
     expect((await students.listStudents(sup, {})).total).toBe(4);
-    await expectDenied(students.setStudentStatus(sup, [bStudentId], "inactive"));
-    await expectDenied(cards.registerCards(sup, ["SUP-1"]));
-    const grants = await settings.supportGrantsFor(B);
-    await settings.revokeSupport(B, grants[0].grant.id);
-    await expectDenied(loadTenantContext(sa, "riverside"));
+    await students.setStudentStatus(sup, [bStudentId], "inactive");
+    await students.setStudentStatus(sup, [bStudentId], "active");
+    const logs = await getDb().select().from(schema.auditLogs).where(and(eq(schema.auditLogs.institutionId, B.institution.id), eq(schema.auditLogs.actorUserId, sa.id), eq(schema.auditLogs.entityType, "student")));
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs.every((l) => l.actorName?.includes("(MySmartCard platform)"))).toBe(true);
+    // A college admin is still confined to their own college.
+    const [ra] = await getDb().select().from(schema.users).where(eq(schema.users.email, "admin@riverside.test"));
+    await expectDenied(loadTenantContext(ra, "northbridge"));
   });
 
   it("blocks users of a suspended college", async () => {
@@ -250,18 +253,16 @@ describe("NFC card lifecycle", () => {
   });
 
   it("respects public-field configuration after publish", async () => {
-    await settings.saveDraftConfig(A, { ...A.draftConfig, publicFields: ["fullName"] });
+    await settings.savePublicFields(A, ["fullName"]);
     A = await ctxFor("admin@northbridge.test", "northbridge");
-    await settings.publishConfig(A);
     const [c] = await cards.listCards(A, { status: "active" });
     const view = await cards.resolveCardToken((await cards.liveTokenForCard(A, c.card.id))!.token);
     expect(view.state === "ok" && Object.keys(view.fields)).toEqual(["fullName"]);
   });
 
   it("shows extra details such as section and emergency contact only when the college enables them", async () => {
-    await settings.saveDraftConfig(A, { ...A.draftConfig, publicFields: ["fullName", "section", "guardianPhone", "notAField"] });
+    await settings.savePublicFields(A, ["fullName", "section", "guardianPhone", "notAField"]);
     A = await ctxFor("admin@northbridge.test", "northbridge");
-    await settings.publishConfig(A);
     const [c] = (await cards.listCards(A, { status: "active" })).filter((x) => x.card.studentId);
     const view = await cards.resolveCardToken((await cards.liveTokenForCard(A, c.card.id))!.token);
     expect(view.state).toBe("ok");
@@ -269,9 +270,8 @@ describe("NFC card lifecycle", () => {
     expect(Object.keys(view.fields).sort()).toEqual(["fullName", "guardianPhone", "section"]);
     expect(view.fields.section).toBeTruthy();
     expect(JSON.stringify(view)).not.toMatch(/@northbridge\.test|address/i);
-    await settings.saveDraftConfig(A, { ...A.draftConfig, publicFields: ["fullName"] });
+    await settings.savePublicFields(A, ["fullName"]);
     A = await ctxFor("admin@northbridge.test", "northbridge");
-    await settings.publishConfig(A);
   });
 
   it("rotation, deactivation, loss and replacement invalidate old URLs and keep the student link", async () => {
@@ -329,23 +329,25 @@ describe("platform college management", () => {
 });
 
 describe("student portal configuration is enforced server-side", () => {
-  it("a disabled module cannot be loaded even by direct request", async () => {
+  it("a module hidden by the super admin cannot be loaded even by direct request", async () => {
+    const [sa] = await getDb().select().from(schema.users).where(eq(schema.users.email, "platform@mysmartcard.test"));
     let st = await ctxFor("student1@northbridge.test", "northbridge");
-    const v = await portal.viewerForStudent(st);
-    expect(await portal.loadModule(v, "fees")).toBeTruthy();
-    const cfg = structuredClone(A.draftConfig);
-    cfg.modules.fees.enabled = false;
-    await settings.saveDraftConfig(A, cfg);
-    // Draft only: students still see fees
+    expect(await portal.loadModule(await portal.viewerForStudent(st), "library")).toBeTruthy();
+    await builder.saveCollegeDraft(sa, A.institution.id, { modules: { library: { enabled: false } }, features: {} });
+    // Draft only: students still see the library
     st = await ctxFor("student1@northbridge.test", "northbridge");
-    expect(await portal.loadModule(await portal.viewerForStudent(st), "fees")).toBeTruthy();
-    // Preview shows the draft immediately
+    expect(await portal.loadModule(await portal.viewerForStudent(st), "library")).toBeTruthy();
+    // The super-admin draft preview reflects it immediately
+    const pv = await loadTenantContext(sa, "northbridge");
+    await expectDenied(portal.loadModule(await portal.viewerForPlatformPreview(pv, st.studentId!, pv.draftConfig), "library"));
+    await builder.publishCollege(sa, A.institution.id);
+    st = await ctxFor("student1@northbridge.test", "northbridge");
+    await expectDenied(portal.loadModule(await portal.viewerForStudent(st), "library"));
+    expect(portal.visibleModules(await portal.viewerForStudent(st), (await portal.portalStudent(await portal.viewerForStudent(st))).student)).not.toContain("library");
+    // Restore
+    await builder.saveCollegeDraft(sa, A.institution.id, { modules: {}, features: {} });
+    await builder.publishCollege(sa, A.institution.id);
     A = await ctxFor("admin@northbridge.test", "northbridge");
-    await expectDenied(portal.loadModule(await portal.viewerForPreview(A, st.studentId!), "fees"));
-    await settings.publishConfig(A);
-    st = await ctxFor("student1@northbridge.test", "northbridge");
-    await expectDenied(portal.loadModule(await portal.viewerForStudent(st), "fees"));
-    expect(portal.visibleModules(await portal.viewerForStudent(st), (await portal.portalStudent(await portal.viewerForStudent(st))).student)).not.toContain("fees");
   });
 
   it("staff cannot use the student viewer and students cannot preview", async () => {

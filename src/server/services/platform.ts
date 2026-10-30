@@ -267,3 +267,11 @@ export async function updateInstitutionDetails(actor: Actor, institutionId: stri
   await platformAudit(actor, { institutionId, action: "institution.update", entityType: "institution", entityId: institutionId, summary: `Updated details for ${inst.name}`, metadata: data });
   return inst;
 }
+
+/** Audited entry into a college workspace by the platform super admin. */
+export async function enterWorkspace(actor: Actor, institutionId: string) {
+  assertSuper(actor);
+  const inst = await assertInstitution(institutionId);
+  await platformAudit(actor, { institutionId: inst.id, action: "platform.enter_workspace", entityType: "institution", entityId: inst.id, summary: `MySmartCard platform admin ${actor.name} opened the ${inst.name} workspace` });
+  return inst;
+}

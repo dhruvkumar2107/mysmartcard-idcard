@@ -2,6 +2,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ref } from "@/db/sql";
 import { getDb } from "@/db";
+import { moduleVisibleToStudent } from "@/lib/portal-config";
 import { feeDemands, feePayments, students, users } from "@/db/schema";
 import { badRequest } from "@/lib/errors";
 import { audit } from "../audit";
@@ -114,6 +115,8 @@ export async function receipt(ctx: TenantContext, paymentId: string) {
   const p = await owned(ctx, feePayments, paymentId, "Receipt");
   const s = await owned(ctx, students, p.studentId, "Student");
   if (ctx.role === "student" && ctx.studentId !== s.id) throw badRequest("Receipt not found.");
+  // Fee records are admin-only unless the super admin enabled the fee section for this college.
+  if (ctx.role === "student" && !moduleVisibleToStudent(ctx.portalConfig, "fees", s)) throw badRequest("Receipt not found.");
   if (ctx.role !== "student") assertCan(ctx, "fees.view");
   const demand = p.demandId ? await ownedOrNull(ctx, feeDemands, p.demandId) : null;
   const [recordedBy] = p.recordedByUserId ? await getDb().select({ name: users.name }).from(users).where(eq(users.id, p.recordedByUserId)) : [];

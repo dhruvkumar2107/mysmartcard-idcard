@@ -10,11 +10,11 @@ export type AuditEntry = {
   metadata?: Record<string, unknown>;
 };
 
-export async function audit(ctx: Pick<TenantContext, "user" | "institution" | "viaSupport">, entry: AuditEntry, tx: Executor = getDb()) {
+export async function audit(ctx: Pick<TenantContext, "user" | "institution" | "viaSupport"> & { viaPlatform?: boolean }, entry: AuditEntry, tx: Executor = getDb()) {
   await tx.insert(auditLogs).values({
     institutionId: ctx.institution.id,
     actorUserId: ctx.user.id,
-    actorName: ctx.viaSupport ? `${ctx.user.name} (platform support)` : ctx.user.name,
+    actorName: ctx.viaPlatform ? `${ctx.user.name} (MySmartCard platform)` : ctx.viaSupport ? `${ctx.user.name} (platform support)` : ctx.user.name,
     action: entry.action,
     entityType: entry.entityType,
     entityId: entry.entityId ?? null,

@@ -10,7 +10,8 @@ import { orNotFound, requireTenant } from "@/server/session";
 import { getStudent, portalAccessStatus, studentDocuments, studentHistory } from "@/server/services/students";
 import { studentAttendance } from "@/server/services/attendance";
 import { examSchedule, publishedResultsForStudent } from "@/server/services/assessments";
-import { timetableFor, upcomingEvents } from "@/server/services/timetable";
+import { upcomingEvents } from "@/server/services/timetable";
+import { timetableImagesForStudent } from "@/server/services/timetable-images";
 import { noticesForStudent } from "@/server/services/notices";
 import { courseworkForStudent } from "@/server/services/coursework";
 import { studentLedger } from "@/server/services/finance";
@@ -164,12 +165,12 @@ export default async function StudentProfile({ params, searchParams }: SlugProps
       )}
 
       {tab === "attendance" && <AttendanceView data={await studentAttendance(ctx, id)} />}
-      {tab === "results" && <ResultsView data={await publishedResultsForStudent(ctx, id)} />}
+      {tab === "results" && <ResultsView data={await publishedResultsForStudent(ctx, id)} showCgpa />}
       {tab === "internal" && <InternalMarksView data={await publishedResultsForStudent(ctx, id)} />}
-      {tab === "timetable" && <TimetableView slots={await timetableFor(ctx, { sectionIds: s.sectionId ? [s.sectionId] : [] })} events={await upcomingEvents(ctx, s.sectionId)} exams={await examSchedule(ctx, s.sectionId ? [s.sectionId] : [])} />}
+      {tab === "timetable" && <TimetableView images={await timetableImagesForStudent(ctx, s)} events={await upcomingEvents(ctx, s.sectionId)} exams={await examSchedule(ctx, s.sectionId ? [s.sectionId] : [])} fileHref={fileHref} downloadHref={(f) => `${fileHref(f)}?download=1`} />}
       {tab === "notices" && <NoticesView notices={await noticesForStudent(ctx, s)} fileHref={fileHref} />}
       {tab === "coursework" && <CourseworkView items={await courseworkForStudent(ctx, s)} fileHref={fileHref} />}
-      {tab === "fees" && can("fees.view") && <FeesView ledger={await studentLedger(ctx, id)} receiptHref={(pid) => `/c/${slug}/receipt/${pid}`} />}
+      {tab === "fees" && can("fees.view") && <FeesView ledger={await studentLedger(ctx, id)} receiptHref={(pid) => `/c/${slug}/receipt/${pid}`} showDue />}
       {tab === "library" && <LibraryView loans={(await loansForStudent(ctx, id)).map((l) => ({ ...l, renewal: renewalEligibility(l.loan) }))} />}
       {tab === "transport" && <TransportView transport={await transportForStudent(ctx, id)} />}
 

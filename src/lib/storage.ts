@@ -96,6 +96,8 @@ export function storage(): StorageAdapter {
 
 export const UPLOAD_RULES = {
   image: { maxBytes: 2 * 1024 * 1024, types: { "image/jpeg": [0xff, 0xd8, 0xff], "image/png": [0x89, 0x50, 0x4e, 0x47], "image/webp": [0x52, 0x49, 0x46, 0x46] } },
+  /** Timetable, notice and assignment photos: larger, still under the 4.5 MB request limit. */
+  photo: { maxBytes: 4 * 1024 * 1024, types: { "image/jpeg": [0xff, 0xd8, 0xff], "image/png": [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "image/webp": [0x52, 0x49, 0x46, 0x46] } },
   document: {
     maxBytes: 4 * 1024 * 1024, // stays under the 4.5 MB serverless request-body limit
     types: {
@@ -121,6 +123,8 @@ export async function validateUpload(file: File, kind: UploadKind): Promise<{ bu
   if (!sig) throw badRequest(`File type not allowed. Allowed: ${Object.keys(signatures).map((t) => t.split("/")[1].split(".").pop()).join(", ")}`);
   const buffer = Buffer.from(await file.arrayBuffer());
   if (!sig.every((b, i) => buffer[i] === b)) throw badRequest("File contents do not match its type.");
+  if (file.type === "image/webp" && buffer.subarray(8, 12).toString("ascii") !== "WEBP") throw badRequest("File contents do not match its type.");
+  if (file.type.startsWith("image/") && buffer.length < 64) throw badRequest("This image file looks damaged or empty.");
   const name = path.basename(file.name).replace(/[^\w.\- ()]/g, "_").slice(0, 120) || "file";
   return { buffer, mimeType: file.type, name };
 }

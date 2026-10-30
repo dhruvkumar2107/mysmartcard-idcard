@@ -62,7 +62,7 @@ export default async function FeesPage({ params, searchParams }: SlugProps) {
             <h3 className="font-semibold">
               {selected.fullName} <span className="font-mono text-sm text-muted">{selected.enrollmentNo}</span>
             </h3>
-            <FeesView ledger={ledger} receiptHref={(id) => `/c/${slug}/receipt/${id}`} />
+            <FeesView ledger={ledger} receiptHref={(id) => `/c/${slug}/receipt/${id}`} showDue />
             {manage && (
               <div className="grid gap-5 lg:grid-cols-2">
                 <Card title="Record payment">

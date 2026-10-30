@@ -3,7 +3,8 @@
 import { cookies } from "next/headers";
 import { encrypt } from "@/lib/crypto";
 import { list, str, userAction } from "../action";
-import { addCollegeAdmin, createInstitution, resetCollegeAdminPassword, setInstitutionStatus, updateInstitutionDetails, updateSubscription } from "../services/platform";
+import { addCollegeAdmin, createInstitution, enterWorkspace, resetCollegeAdminPassword, setInstitutionStatus, updateInstitutionDetails, updateSubscription } from "../services/platform";
+import * as builder from "../services/portal-builder";
 
 /** Credentials are shown once on the next page via a short-lived encrypted httpOnly cookie, never in the URL. */
 async function stash(msg: string) {
@@ -65,5 +66,65 @@ export async function resetAdminPasswordAction(fd: FormData) {
     const res = await resetCollegeAdminPassword(user, str(fd, "id"), str(fd, "userId"), str(fd, "password") || null);
     await stash(`New login for ${res.email} / ${res.password}`);
     return "Password reset. The administrator must choose a new password at first sign-in; their existing sessions were signed out.";
+  });
+}
+
+// ---------------------------------------------------------------- Portal Builder (super admin only)
+
+const builderBack = (id: string | null, tab = "visibility") => `/platform/portal?college=${id ?? "global"}&tab=${tab}`;
+const collegeOrNull = (fd: FormData) => {
+  const id = str(fd, "college");
+  return id && id !== "global" ? id : null;
+};
+
+export async function savePortalPolicyAction(fd: FormData) {
+  return userAction(fd, "/platform/portal", async (user) => {
+    const id = collegeOrNull(fd);
+    const policy = builder.policyFromForm(fd);
+    const publish = str(fd, "intent") === "publish";
+    if (id) {
+      const branding = str(fd, "primaryColor") ? { primaryColor: str(fd, "primaryColor"), accentColor: str(fd, "accentColor"), welcomeMessage: str(fd, "welcomeMessage") } : undefined;
+      await builder.saveCollegeDraft(user, id, policy, branding);
+      const logo = fd.get("logo");
+      if (logo instanceof File && logo.size > 0) await builder.uploadCollegeLogo(user, id, logo);
+      if (publish) await builder.publishCollege(user, id);
+    } else {
+      await builder.saveGlobalDraft(user, policy);
+      if (publish) await builder.publishGlobal(user);
+    }
+    return { message: publish ? "Published. Students see the change on their next page load." : "Draft saved. Preview it, then publish.", to: builderBack(id, str(fd, "tab") || "visibility") };
+  });
+}
+
+export async function publishPortalPolicyAction(fd: FormData) {
+  return userAction(fd, "/platform/portal", async (user) => {
+    const id = collegeOrNull(fd);
+    if (id) await builder.publishCollege(user, id);
+    else await builder.publishGlobal(user);
+    return "Published.";
+  });
+}
+
+export async function discardPortalPolicyAction(fd: FormData) {
+  return userAction(fd, "/platform/portal", async (user) => {
+    const id = collegeOrNull(fd);
+    if (id) await builder.discardCollegeDraft(user, id);
+    else await builder.discardGlobalDraft(user);
+    return "Draft discarded.";
+  });
+}
+
+export async function rollbackPortalPolicyAction(fd: FormData) {
+  return userAction(fd, "/platform/portal", async (user) => {
+    const id = await builder.rollbackTo(user, str(fd, "historyId"));
+    return { message: "Version restored and published.", to: builderBack(id, "history") };
+  });
+}
+
+/** Opening a college workspace from the platform is recorded in that college's audit log. */
+export async function enterWorkspaceAction(fd: FormData) {
+  return userAction(fd, "/platform", async (user) => {
+    const inst = await enterWorkspace(user, str(fd, "id"));
+    return { to: `/c/${inst.slug}/admin` };
   });
 }

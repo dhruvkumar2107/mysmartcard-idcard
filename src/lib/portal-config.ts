@@ -2,14 +2,14 @@ import { z } from "zod";
 
 export const MODULES = [
   { key: "digital_id", label: "Digital ID", description: "Photo, name, enrollment and card status" },
-  { key: "attendance", label: "Attendance", description: "Overall and subject-wise attendance" },
   { key: "results", label: "Examination Results", description: "Published internal, midterm and end-semester results" },
   { key: "internal_marks", label: "Practical & Internal Marks", description: "Labs, viva, class tests, projects" },
-  { key: "timetable", label: "Timetable", description: "Weekly schedule, holidays and exam timetable" },
+  { key: "timetable", label: "Timetable", description: "Uploaded timetable images, holidays and exam schedule" },
   { key: "notices", label: "Notice Board", description: "Announcements and circulars" },
-  { key: "coursework", label: "Assignments & Materials", description: "Assignments, notes and submissions" },
-  { key: "fees", label: "Fee Status & Receipts", description: "Dues, payments and receipts" },
+  { key: "coursework", label: "Assignments & Materials", description: "Assignment images and study material" },
   { key: "library", label: "Library", description: "Issued books, due dates and fines" },
+  { key: "attendance", label: "Attendance", description: "Overall and subject-wise attendance" },
+  { key: "fees", label: "Fee Status & Receipts", description: "Dues, payments and receipts" },
   { key: "transport", label: "Transport", description: "Route, pickup point and timings" },
 ] as const;
 export type ModuleKey = (typeof MODULES)[number]["key"];
@@ -62,8 +62,11 @@ export const portalConfigSchema = z.object({
     }),
   ),
   publicFields: z.array(z.string()),
+  /** Resolved super-admin data flags. Never trusted from storage: applyPolicy() always overwrites them. */
+  features: z.record(z.string(), z.boolean()).optional(),
 });
 export type PortalConfig = z.infer<typeof portalConfigSchema>;
+export type Branding = PortalConfig["branding"];
 
 export function defaultPortalConfig(licensed: string[] = MODULE_KEYS): PortalConfig {
   return {
@@ -72,7 +75,94 @@ export function defaultPortalConfig(licensed: string[] = MODULE_KEYS): PortalCon
       MODULE_KEYS.map((key, i) => [key, { enabled: licensed.includes(key), order: i, departmentIds: [], programmeIds: [] }]),
     ),
     publicFields: ["photo", "fullName", "enrollmentNo", "department", "programme", "status", "cardValidity"],
+    features: allFlags(false),
   };
+}
+
+// ---------------------------------------------------------------- Super-admin portal policy
+
+/**
+ * Data the student portal hides unless the MySmartCard super admin turns it on.
+ * Each flag is enforced in the server-side portal loaders, not only in the UI.
+ */
+export const FEATURE_FLAGS = [
+  { key: "showAttendance", label: "Attendance", description: "Attendance summary, percentages, subject-wise attendance and history" },
+  { key: "showCGPA", label: "CGPA / SGPA", description: "CGPA and SGPA values (exam results stay visible either way)" },
+  { key: "showFeeBalance", label: "Fee balance", description: "Fee section: payable, paid and outstanding amounts, payment history" },
+  { key: "showFeeDueReminders", label: "Fee due dates & reminders", description: "Due dates and overdue reminders inside the fee section" },
+  { key: "showAssignmentDeadlines", label: "Assignment deadlines", description: "Due dates, overdue labels and due-count tiles for assignments" },
+  { key: "showTransport", label: "Transport", description: "Bus route, stop, pickup and drop timings" },
+] as const;
+export type FeatureFlag = (typeof FEATURE_FLAGS)[number]["key"];
+export const FLAG_KEYS = FEATURE_FLAGS.map((f) => f.key) as FeatureFlag[];
+export type Features = Record<FeatureFlag, boolean>;
+
+export function allFlags(v: boolean): Features {
+  return Object.fromEntries(FLAG_KEYS.map((k) => [k, v])) as Features;
+}
+
+/** Modules whose visibility IS a data flag (no separate module toggle). */
+export const FLAG_MODULES: Partial<Record<ModuleKey, FeatureFlag>> = { attendance: "showAttendance", fees: "showFeeBalance", transport: "showTransport" };
+
+/**
+ * A policy layer. Global defaults are a complete policy; a college override holds
+ * only the keys the super admin explicitly set, so changing a global default never
+ * overwrites an explicit college choice.
+ */
+export const portalPolicySchema = z.object({
+  modules: z.record(z.string(), z.object({ enabled: z.boolean().optional(), order: z.number().int().min(0).max(100).optional() })).default({}),
+  features: z.record(z.string(), z.boolean()).default({}),
+});
+export type PortalPolicy = z.infer<typeof portalPolicySchema>;
+export type ResolvedPolicy = { modules: Record<ModuleKey, { enabled: boolean; order: number }>; features: Features };
+
+export function builtinDefaultPolicy(): ResolvedPolicy {
+  return {
+    modules: Object.fromEntries(MODULE_KEYS.map((k, i) => [k, { enabled: true, order: i }])) as ResolvedPolicy["modules"],
+    features: allFlags(false),
+  };
+}
+
+/** Parse a stored policy layer, dropping unknown keys. */
+export function normalizePolicy(raw: unknown): PortalPolicy {
+  const parsed = portalPolicySchema.safeParse(raw ?? {});
+  if (!parsed.success) return { modules: {}, features: {} };
+  const out: PortalPolicy = { modules: {}, features: {} };
+  for (const k of MODULE_KEYS) {
+    const m = parsed.data.modules[k];
+    if (m && (m.enabled !== undefined || m.order !== undefined)) out.modules[k] = { ...(m.enabled !== undefined && { enabled: m.enabled }), ...(m.order !== undefined && { order: m.order }) };
+  }
+  for (const f of FLAG_KEYS) if (typeof parsed.data.features[f] === "boolean") out.features[f] = parsed.data.features[f];
+  return out;
+}
+
+/** Layer policies left to right: built-in defaults, then global defaults, then the college override. */
+export function resolvePolicy(...layers: PortalPolicy[]): ResolvedPolicy {
+  const r = builtinDefaultPolicy();
+  for (const layer of layers) {
+    for (const k of MODULE_KEYS) {
+      const m = layer.modules[k];
+      if (m?.enabled !== undefined) r.modules[k].enabled = m.enabled;
+      if (m?.order !== undefined) r.modules[k].order = m.order;
+    }
+    for (const f of FLAG_KEYS) if (layer.features[f] !== undefined) r.features[f] = layer.features[f]!;
+  }
+  for (const [k, flag] of Object.entries(FLAG_MODULES)) r.modules[k as ModuleKey].enabled = r.features[flag];
+  return r;
+}
+
+/** The effective student-portal configuration: college branding/restrictions + super-admin policy + subscription. */
+export function applyPolicy(cfg: PortalConfig, policy: ResolvedPolicy, licensed: string[]): PortalConfig {
+  const modules = { ...cfg.modules };
+  for (const k of MODULE_KEYS) {
+    const base = modules[k] ?? { enabled: true, order: 0, departmentIds: [], programmeIds: [] };
+    modules[k] = { ...base, enabled: policy.modules[k].enabled && licensed.includes(k), order: policy.modules[k].order };
+  }
+  return { ...cfg, modules, features: { ...policy.features } };
+}
+
+export function feature(cfg: PortalConfig, f: FeatureFlag): boolean {
+  return cfg.features?.[f] === true;
 }
 
 /** Parse stored JSON defensively, filling any missing module keys. */
@@ -87,6 +177,8 @@ export function normalizeConfig(raw: unknown, licensed: string[]): PortalConfig 
     if (!licensed.includes(key)) cfg.modules[key].enabled = false;
   }
   cfg.publicFields = cfg.publicFields.filter((f) => PUBLIC_FIELDS.some((p) => p.key === f));
+  // Flags only ever come from the super-admin policy (applyPolicy); stored values are ignored.
+  cfg.features = allFlags(false);
   return cfg;
 }
 

@@ -1,12 +1,14 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { BookOpen, Bus, CalendarClock, ClipboardCheck, CreditCard, FileText, Home, Library, Megaphone, NotebookPen, Wallet, type LucideIcon } from "lucide-react";
-import { MODULES, type ModuleKey } from "@/lib/portal-config";
-import { formatDate, formatMoney } from "@/lib/format";
+import { ArrowRight, BookOpen, Bus, CalendarClock, ChevronLeft, ClipboardCheck, CreditCard, FileText, Home, Library, Megaphone, NotebookPen, Wallet, type LucideIcon } from "lucide-react";
+import { MODULES, feature, type ModuleKey } from "@/lib/portal-config";
+import { formatDate, formatMoney, initials } from "@/lib/format";
 import { loadModule, portalHome, visibleModules, portalStudent, type PortalViewer } from "@/server/services/portal";
-import { AttendanceView, CourseworkView, DigitalIdCard, FeesView, InternalMarksView, LibraryView, NoticesView, ResultsView, TimetableView, TransportView } from "./views";
-import { Badge, Card, Input, Meter, cn } from "./ui";
+import { noticeForViewer } from "@/server/services/notices";
+import { AttendanceView, CourseworkView, DigitalIdCard, FeesView, InternalMarksView, LibraryView, NoticeCard, NoticeDetail, NoticesView, ResultsView, TimetableView, TransportView } from "./views";
+import { Badge, EmptyState, Input, LinkButton, Meter, cn } from "./ui";
 import { SubmitButton } from "./client";
+import { MarkNoticeRead, NotificationBell } from "./notifications";
 
 export const MODULE_ICONS: Record<ModuleKey, LucideIcon> = {
   digital_id: CreditCard,
@@ -35,143 +37,224 @@ const SLUG_OF: Record<ModuleKey, string> = {
 };
 export const moduleFromSlug = (s: string) => (Object.entries(SLUG_OF).find(([, v]) => v === s)?.[0] as ModuleKey | undefined) ?? null;
 export const moduleHref = (base: string, k: ModuleKey) => `${base}/${SLUG_OF[k]}`;
+const label = (k: ModuleKey) => MODULES.find((m) => m.key === k)!.label;
+const fileHref = (id: string) => `/api/files/${id}`;
 
 export async function PortalShell({ v, base, active, children, topRight }: { v: PortalViewer; base: string; active: ModuleKey | "home"; children: ReactNode; topRight?: ReactNode }) {
   const me = await portalStudent(v);
   const mods = visibleModules(v, me.student);
   const b = v.config.branding;
-  const bottom = (["attendance", "results", "timetable", "notices"] as ModuleKey[]).filter((k) => mods.includes(k)).slice(0, 4);
+  const s = me.student;
+  const bottom = mods.filter((k) => k !== "digital_id").slice(0, 4);
+  const showBell = !v.preview && mods.includes("notices");
   return (
-    <div style={{ ["--brand" as string]: b.primaryColor, ["--accent" as string]: b.accentColor }} className="min-h-screen pb-20 md:pb-0">
-      {v.preview && <div className="sticky top-0 z-40 bg-amber-400 px-4 py-1.5 text-center text-xs font-medium text-amber-950">Preview of the DRAFT portal configuration as {me.student.fullName} sees it — not visible to students until published.</div>}
-      <header className="text-white" style={{ background: `linear-gradient(135deg, ${b.primaryColor}, color-mix(in srgb, ${b.primaryColor} 65%, black))` }}>
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-4">
-          {b.logoFileId && (
+    <div style={{ ["--brand" as string]: b.primaryColor, ["--accent" as string]: b.accentColor }} className="min-h-screen bg-bg pb-24 md:pb-10">
+      {v.preview && <div className="sticky top-0 z-40 bg-amber-400 px-4 py-1.5 text-center text-xs font-medium text-amber-950">Preview — this is exactly what {s.fullName} sees with the configuration being previewed.</div>}
+      <header className="relative overflow-hidden text-white" style={{ background: `linear-gradient(135deg, ${b.primaryColor}, color-mix(in srgb, ${b.primaryColor} 60%, black))` }}>
+        <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-2xl" aria-hidden />
+        <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
+          {b.logoFileId ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={`/api/files/${b.logoFileId}`} alt="" className="h-9 w-9 rounded-md bg-white object-contain p-0.5" />
+            <img src={fileHref(b.logoFileId)} alt="" className="h-10 w-10 rounded-lg bg-white object-contain p-0.5 shadow-sm" />
+          ) : (
+            <span className="grid h-10 w-10 place-items-center rounded-lg bg-white/15 text-xs font-bold">{v.ctx.institution.shortName.slice(0, 3)}</span>
           )}
           <Link href={base} className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{v.ctx.institution.name}</div>
+            <div className="truncate text-sm font-semibold sm:text-base">{v.ctx.institution.name}</div>
             <div className="text-xs text-white/70">Student portal</div>
           </Link>
+          {showBell && <NotificationBell slug={v.ctx.institution.slug} noticeHref={moduleHref(base, "notices")} />}
           {topRight}
         </div>
-        <nav className="mx-auto hidden max-w-5xl gap-1 overflow-x-auto px-3 pb-2 md:flex" aria-label="Portal">
-          <Link href={base} className={cn("rounded-lg px-3 py-1.5 text-sm text-white/80 hover:bg-white/10", active === "home" && "bg-white/15 text-white")}>
+        {active === "home" && (
+          <div className="relative mx-auto flex max-w-6xl items-center gap-4 px-4 pb-6 pt-2">
+            {s.photoFileId ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={fileHref(s.photoFileId)} alt={`Photograph of ${s.fullName}`} className="h-20 w-20 shrink-0 rounded-2xl border-2 border-white/60 object-cover shadow-lg sm:h-24 sm:w-24" />
+            ) : (
+              <div className="grid h-20 w-20 shrink-0 place-items-center rounded-2xl border-2 border-white/40 bg-white/15 text-2xl font-semibold sm:h-24 sm:w-24" aria-hidden>
+                {initials(s.fullName)}
+              </div>
+            )}
+            <div className="min-w-0">
+              <h1 className="truncate text-xl font-semibold sm:text-2xl">{s.fullName}</h1>
+              <p className="font-mono text-sm text-white/85">{s.enrollmentNo}</p>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+                {me.department && <span className="rounded-full bg-white/15 px-2.5 py-1">{me.department.name}</span>}
+                {me.programme && <span className="rounded-full bg-white/15 px-2.5 py-1">{me.programme.name}</span>}
+                <span className="rounded-full bg-white/15 px-2.5 py-1">
+                  Semester {s.semester}
+                  {me.section ? ` · Section ${me.section.name}` : ""}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+        <nav className="relative mx-auto hidden max-w-6xl gap-1 overflow-x-auto px-3 pb-2 md:flex" aria-label="Portal sections">
+          <NavLink href={base} on={active === "home"}>
             Home
-          </Link>
+          </NavLink>
           {mods.map((k) => (
-            <Link key={k} href={moduleHref(base, k)} className={cn("whitespace-nowrap rounded-lg px-3 py-1.5 text-sm text-white/80 hover:bg-white/10", active === k && "bg-white/15 text-white")}>
-              {MODULES.find((m) => m.key === k)!.label}
-            </Link>
+            <NavLink key={k} href={moduleHref(base, k)} on={active === k}>
+              {label(k)}
+            </NavLink>
           ))}
         </nav>
       </header>
-      <main className="mx-auto max-w-5xl px-4 py-5">{children}</main>
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface md:hidden" aria-label="Quick">
-        <Link href={base} className={cn("flex flex-col items-center gap-0.5 py-2 text-[11px]", active === "home" ? "text-brand" : "text-muted")}>
-          <Home className="h-5 w-5" aria-hidden /> Home
-        </Link>
-        {bottom.map((k) => {
-          const Icon = MODULE_ICONS[k];
-          return (
-            <Link key={k} href={moduleHref(base, k)} className={cn("flex flex-col items-center gap-0.5 py-2 text-[11px]", active === k ? "text-brand" : "text-muted")}>
-              <Icon className="h-5 w-5" aria-hidden /> {MODULES.find((m) => m.key === k)!.label.split(" ")[0]}
-            </Link>
-          );
-        })}
+      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid border-t border-line bg-surface/95 backdrop-blur md:hidden" style={{ gridTemplateColumns: `repeat(${bottom.length + 1}, minmax(0, 1fr))` }} aria-label="Quick navigation">
+        <BottomLink href={base} on={active === "home"} icon={Home}>
+          Home
+        </BottomLink>
+        {bottom.map((k) => (
+          <BottomLink key={k} href={moduleHref(base, k)} on={active === k} icon={MODULE_ICONS[k]}>
+            {label(k).split(/[ &]/)[0]}
+          </BottomLink>
+        ))}
       </nav>
     </div>
+  );
+}
+
+function NavLink({ href, on, children }: { href: string; on: boolean; children: ReactNode }) {
+  return (
+    <Link href={href} aria-current={on ? "page" : undefined} className={cn("whitespace-nowrap rounded-lg px-3 py-1.5 text-sm text-white/80 transition hover:bg-white/10 hover:text-white", on && "bg-white/20 text-white")}>
+      {children}
+    </Link>
+  );
+}
+
+function BottomLink({ href, on, icon: Icon, children }: { href: string; on: boolean; icon: LucideIcon; children: ReactNode }) {
+  return (
+    <Link href={href} aria-current={on ? "page" : undefined} className={cn("flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium", on ? "text-brand" : "text-muted")}>
+      <Icon className="h-5 w-5" aria-hidden />
+      {children}
+    </Link>
   );
 }
 
 export async function PortalHome({ v, base }: { v: PortalViewer; base: string }) {
   const h = await portalHome(v);
   const s = h.me.student;
-  const photo = s.photoFileId ? `/api/files/${s.photoFileId}` : null;
+  const has = (k: ModuleKey) => h.modules.includes(k);
+  const summary: Partial<Record<ModuleKey, string>> = {
+    results: "Published semester results and grades",
+    internal_marks: "Practical, lab, viva and internal marks",
+    timetable: h.timetable ? `${h.timetable.title} · updated ${formatDate(h.timetable.updatedAt)}` : "No timetable published yet",
+    notices: h.unreadNotices ? `${h.unreadNotices} unread notice${h.unreadNotices === 1 ? "" : "s"}` : "You're all caught up",
+    coursework: h.assignments ? `${h.assignments} item${h.assignments === 1 ? "" : "s"}${h.latestAssignment ? ` · latest: ${h.latestAssignment.subject}` : ""}` : "Nothing posted yet",
+    library: "Books issued to you and fines",
+    attendance: "Attendance summary and history",
+    fees: "Fee status and receipts",
+    transport: "Your bus route and stop",
+  };
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold">Hi, {s.fullName.split(" ")[0]}</h1>
-        <p className="text-sm text-muted">{v.config.branding.welcomeMessage}</p>
-      </div>
-      <div className="grid gap-5 md:grid-cols-2">
-        {h.modules.includes("digital_id") && (
-          <DigitalIdCard college={{ name: v.ctx.institution.name, logoUrl: v.config.branding.logoFileId ? `/api/files/${v.config.branding.logoFileId}` : null }} student={{ ...s, department: h.me.department?.name, programme: h.me.programme?.name }} photoUrl={photo} brand={v.config.branding.primaryColor} />
+    <div className="space-y-8">
+      {v.config.branding.welcomeMessage && <p className="text-sm text-muted">{v.config.branding.welcomeMessage}</p>}
+
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,24rem)_1fr]">
+        {has("digital_id") && (
+          <section aria-labelledby="id-h">
+            <h2 id="id-h" className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
+              Digital student ID
+            </h2>
+            <DigitalIdCard college={{ name: v.ctx.institution.name, logoUrl: v.config.branding.logoFileId ? fileHref(v.config.branding.logoFileId) : null }} student={{ ...s, department: h.me.department?.name, programme: h.me.programme?.name }} photoUrl={s.photoFileId ? fileHref(s.photoFileId) : null} brand={v.config.branding.primaryColor} />
+          </section>
         )}
-        <div className="grid grid-cols-2 gap-3 self-start">
-          {h.attendance && (
-            <Tile href={moduleHref(base, "attendance")} label="Attendance">
-              <div className={cn("text-2xl font-semibold tabular-nums", h.attendance.shortage ? "text-danger" : "text-ok")}>{h.attendance.percentage ?? "—"}%</div>
-              <Meter value={h.attendance.percentage} threshold={h.threshold ?? undefined} />
-              {h.attendance.shortage && <div className="mt-1 text-xs text-danger">Below {h.threshold}%</div>}
-            </Tile>
+        <section aria-labelledby="sections-h" className="min-w-0">
+          <h2 id="sections-h" className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
+            Your sections
+          </h2>
+          {/* Optional tiles: data only exists here when the super admin enabled it. */}
+          {(h.attendance || h.cgpa !== null || h.balance !== null || h.dueAssignments !== null) && (
+            <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {h.attendance && (
+                <Tile href={moduleHref(base, "attendance")} label="Attendance">
+                  <div className={cn("text-2xl font-semibold tabular-nums", h.attendance.shortage ? "text-danger" : "text-ok")}>{h.attendance.percentage ?? "—"}%</div>
+                  <Meter value={h.attendance.percentage} threshold={h.threshold ?? undefined} />
+                </Tile>
+              )}
+              {h.cgpa !== null && (
+                <Tile href={moduleHref(base, "results")} label="CGPA">
+                  <div className="text-2xl font-semibold tabular-nums">{h.cgpa}</div>
+                </Tile>
+              )}
+              {h.balance !== null && (
+                <Tile href={moduleHref(base, "fees")} label="Fee balance">
+                  <div className={cn("text-xl font-semibold tabular-nums", h.balance > 0 ? "text-danger" : "text-ok")}>{formatMoney(Math.max(0, h.balance))}</div>
+                </Tile>
+              )}
+              {h.dueAssignments !== null && (
+                <Tile href={moduleHref(base, "coursework")} label="Assignments due">
+                  <div className="text-2xl font-semibold tabular-nums">{h.dueAssignments}</div>
+                </Tile>
+              )}
+            </div>
           )}
-          {h.modules.includes("results") && (
-            <Tile href={moduleHref(base, "results")} label="CGPA">
-              <div className="text-2xl font-semibold tabular-nums">{h.cgpa ?? "—"}</div>
-              <div className="text-xs text-muted">Published results</div>
-            </Tile>
-          )}
-          {h.balance !== null && (
-            <Tile href={moduleHref(base, "fees")} label="Fee balance">
-              <div className={cn("text-xl font-semibold tabular-nums", h.balance > 0 ? "text-danger" : "text-ok")}>{formatMoney(Math.max(0, h.balance))}</div>
-              <div className="text-xs text-muted">{h.balance > 0 ? "Outstanding" : "All clear"}</div>
-            </Tile>
-          )}
-          {h.dueAssignments !== null && (
-            <Tile href={moduleHref(base, "coursework")} label="Assignments due">
-              <div className="text-2xl font-semibold tabular-nums">{h.dueAssignments}</div>
-              <div className="text-xs text-muted">Not yet submitted</div>
-            </Tile>
-          )}
-        </div>
-      </div>
-      {h.notices && h.notices.length > 0 && (
-        <Card title="Latest notices" padded={false} actions={<Link href={moduleHref(base, "notices")} className="text-sm text-brand">All</Link>}>
-          <ul className="divide-y divide-line">
-            {h.notices.map((n) => (
-              <li key={n.id} className="px-5 py-3 text-sm">
-                <div className="flex items-center gap-2">
-                  {n.pinned && <Badge tone="violet">Pinned</Badge>}
-                  <span className="font-medium">{n.title}</span>
-                </div>
-                <div className="text-xs text-muted">{formatDate(n.publishAt)}</div>
-              </li>
-            ))}
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {h.modules
+              .filter((k) => k !== "digital_id")
+              .map((k) => {
+                const Icon = MODULE_ICONS[k];
+                const unread = k === "notices" && (h.unreadNotices ?? 0) > 0;
+                return (
+                  <li key={k}>
+                    <Link href={moduleHref(base, k)} className="group flex h-full items-center gap-3 rounded-2xl border border-line bg-surface p-4 transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md">
+                      <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand">
+                        <Icon className="h-5 w-5" aria-hidden />
+                        {unread && <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-red-500 ring-2 ring-surface" aria-hidden />}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium">{label(k)}</span>
+                        <span className="block truncate text-xs text-muted">{summary[k]}</span>
+                      </span>
+                      <ArrowRight className="h-4 w-4 shrink-0 text-muted transition group-hover:translate-x-0.5 group-hover:text-brand" aria-hidden />
+                    </Link>
+                  </li>
+                );
+              })}
           </ul>
-        </Card>
-      )}
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-        {h.modules.map((k) => {
-          const Icon = MODULE_ICONS[k];
-          return (
-            <Link key={k} href={moduleHref(base, k)} className="flex flex-col items-center gap-2 rounded-xl border border-line bg-surface p-3 text-center text-xs font-medium hover:border-brand/40">
-              <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand/10 text-brand">
-                <Icon className="h-5 w-5" aria-hidden />
-              </span>
-              {MODULES.find((m) => m.key === k)!.label}
-            </Link>
-          );
-        })}
+        </section>
       </div>
+
+      {h.notices && (
+        <section aria-labelledby="notices-h">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 id="notices-h" className="text-sm font-semibold uppercase tracking-wide text-muted">
+              Latest notices
+            </h2>
+            <Link href={moduleHref(base, "notices")} className="text-sm font-medium text-brand">
+              View all
+            </Link>
+          </div>
+          {h.notices.length === 0 ? (
+            <EmptyState title="No notices yet" />
+          ) : (
+            <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {h.notices.map((n) => (
+                <li key={n.id}>
+                  <NoticeCard n={n} href={`${moduleHref(base, "notices")}/${n.id}`} fileHref={fileHref} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
     </div>
   );
 }
 
 function Tile({ href, label, children }: { href: string; label: string; children: ReactNode }) {
   return (
-    <Link href={href} className="block rounded-xl border border-line bg-surface p-4 hover:border-brand/40">
+    <Link href={href} className="block rounded-2xl border border-line bg-surface p-4 transition hover:border-brand/40">
       <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">{label}</div>
       {children}
     </Link>
   );
 }
 
-export async function PortalModule({ v, k, q, submitAction }: { v: PortalViewer; k: ModuleKey; q?: string; submitAction?: (fd: FormData) => Promise<void> }) {
-  const data = await loadModule(v, k, { q });
-  const fileHref = (id: string) => `/api/files/${id}`;
-  const title = MODULES.find((m) => m.key === k)!.label;
+export async function PortalModule({ v, k, q, page, base, submitAction }: { v: PortalViewer; k: ModuleKey; q?: string; page?: number; base: string; submitAction?: (fd: FormData) => Promise<void> }) {
+  const data = await loadModule(v, k, { q, page });
   const slug = v.ctx.institution.slug;
   let body: ReactNode = null;
   switch (data.key) {
@@ -193,24 +276,46 @@ export async function PortalModule({ v, k, q, submitAction }: { v: PortalViewer;
       body = <AttendanceView data={data.data} />;
       break;
     case "results":
-      body = <ResultsView data={data.data} />;
+      body = <ResultsView data={data.data} showCgpa={feature(v.config, "showCGPA")} />;
       break;
     case "internal_marks":
       body = <InternalMarksView data={data.data} />;
       break;
     case "timetable":
-      body = <TimetableView slots={data.slots} events={data.events} exams={data.exams} />;
+      body = <TimetableView images={data.images} events={data.events} exams={data.exams} fileHref={fileHref} downloadHref={(id) => `${fileHref(id)}?download=1`} />;
       break;
-    case "notices":
+    case "notices": {
+      const f = data.feed;
+      const href = moduleHref(base, "notices");
+      const pageHref = (p: number) => `${href}?${new URLSearchParams({ ...(q ? { q } : {}), page: String(p) })}`;
       body = (
-        <div className="space-y-4">
-          <form role="search">
-            <Input name="q" defaultValue={q} placeholder="Search notices" aria-label="Search notices" />
-          </form>
-          <NoticesView notices={data.notices} fileHref={fileHref} />
+        <div className="space-y-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <form role="search" className="flex-1">
+              <Input name="q" defaultValue={q} placeholder="Search notices" aria-label="Search notices" />
+            </form>
+            <span className="text-sm text-muted">{f.unread ? <Badge tone="blue">{f.unread} unread</Badge> : "All caught up"}</span>
+          </div>
+          {f.items.length === 0 ? (
+            <EmptyState title={q ? "No notices match your search" : "No notices yet"} description="Announcements from your college appear here, newest first." />
+          ) : (
+            <NoticesView notices={f.items} fileHref={fileHref} hrefFor={(id) => `${href}/${id}`} />
+          )}
+          {f.pages > 1 && (
+            <nav className="flex items-center justify-between text-sm" aria-label="Pagination">
+              <span className="text-muted">
+                Page {f.page} of {f.pages}
+              </span>
+              <div className="flex gap-2">
+                {f.page > 1 && <LinkButton href={pageHref(f.page - 1)}>Newer</LinkButton>}
+                {f.page < f.pages && <LinkButton href={pageHref(f.page + 1)}>Older</LinkButton>}
+              </div>
+            </nav>
+          )}
         </div>
       );
       break;
+    }
     case "coursework":
       body = (
         <CourseworkView
@@ -232,11 +337,11 @@ export async function PortalModule({ v, k, q, submitAction }: { v: PortalViewer;
       );
       break;
     case "fees":
-      body = <FeesView ledger={data.ledger} receiptHref={(id) => `/c/${slug}/receipt/${id}`} />;
+      body = <FeesView ledger={data.ledger} receiptHref={(id) => `/c/${slug}/receipt/${id}`} showDue={feature(v.config, "showFeeDueReminders")} />;
       break;
     case "library":
       body = (
-        <div className="space-y-4">
+        <div className="space-y-5">
           <LibraryView loans={data.loans} />
           {data.notices.length > 0 && <NoticesView notices={data.notices} fileHref={fileHref} />}
         </div>
@@ -244,17 +349,38 @@ export async function PortalModule({ v, k, q, submitAction }: { v: PortalViewer;
       break;
     case "transport":
       body = (
-        <div className="space-y-4">
+        <div className="space-y-5">
           <TransportView transport={data.transport} />
           {data.notices.length > 0 && <NoticesView notices={data.notices} fileHref={fileHref} />}
         </div>
       );
       break;
   }
+  const Icon = MODULE_ICONS[k];
   return (
     <div className="fade-in">
-      <h1 className="mb-4 text-xl font-semibold">{title}</h1>
+      <div className="mb-5 flex items-center gap-3">
+        <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand/10 text-brand">
+          <Icon className="h-5 w-5" aria-hidden />
+        </span>
+        <h1 className="text-xl font-semibold sm:text-2xl">{label(k)}</h1>
+      </div>
       {body}
+    </div>
+  );
+}
+
+/** One notice, opened from the feed or the bell. Opening it marks only this notice as read. */
+export async function PortalNotice({ v, base, id }: { v: PortalViewer; base: string; id: string }) {
+  const me = await portalStudent(v);
+  const n = await noticeForViewer(v.ctx, { kind: "student", student: me.student }, id);
+  return (
+    <div className="fade-in mx-auto max-w-3xl">
+      <Link href={moduleHref(base, "notices")} className="mb-4 inline-flex items-center gap-1 text-sm text-muted hover:text-ink">
+        <ChevronLeft className="h-4 w-4" aria-hidden /> All notices
+      </Link>
+      <NoticeDetail n={n} fileHref={fileHref} />
+      {!v.preview && <MarkNoticeRead slug={v.ctx.institution.slug} id={n.id} unread={n.unread} />}
     </div>
   );
 }

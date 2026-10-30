@@ -7,14 +7,15 @@ import { loadTenantContext, type TenantContext } from "@/server/context";
 import { getSessionUser } from "@/server/session";
 import { isUuid } from "@/server/services/guard";
 import { getStudent } from "@/server/services/students";
-import { noticeTargetsStudent } from "@/server/services/notices";
+import { noticeViewer, noticeVisibleTo } from "@/server/services/notices";
+import { canViewTimetableFile } from "@/server/services/timetable-images";
 import { submissionsFor } from "@/server/services/coursework";
 
 /**
  * Private file download. Authorization is decided per owner type — knowing a
  * file id is never enough.
  */
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!isUuid(id)) return new Response("Not found", { status: 404 });
   const db = getDb();
@@ -35,7 +36,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
 
   const body = await storage().get(f.file.storageKey);
-  const inline = f.file.mimeType.startsWith("image/") || f.file.mimeType === "application/pdf";
+  const download = new URL(req.url).searchParams.get("download") === "1";
+  const inline = !download && (f.file.mimeType.startsWith("image/") || f.file.mimeType === "application/pdf");
   return new Response(new Uint8Array(body), {
     headers: {
       "Content-Type": f.file.mimeType,
@@ -62,12 +64,15 @@ async function authorize(ctx: TenantContext, file: typeof files.$inferSelect): P
       case "notice": {
         if (ctx.perms.has("notices.publish")) return true;
         const [n] = await db.select().from(notices).where(and(eq(notices.id, file.ownerId!), eq(notices.institutionId, ctx.institution.id))).limit(1);
-        return !!me && !!n && n.status === "published" && noticeTargetsStudent(n.audience, me);
+        const viewer = await noticeViewer(ctx);
+        return !!viewer && !!n && n.status === "published" && noticeVisibleTo(n, viewer);
       }
+      case "timetable_image":
+        return canViewTimetableFile(ctx, file, me);
       case "coursework": {
         const [cw] = await db.select().from(coursework).where(and(eq(coursework.id, file.ownerId!), eq(coursework.institutionId, ctx.institution.id))).limit(1);
         if (!cw) return false;
-        if (me) return me.sectionId === cw.sectionId;
+        if (me) return me.sectionId === cw.sectionId && cw.status === "published";
         await submissionsFor(ctx, cw.id); // throws unless the staff member manages this class
         return true;
       }

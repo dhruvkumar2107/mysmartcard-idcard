@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { encrypt } from "@/lib/crypto";
 import { badRequest } from "@/lib/errors";
 import { parseRupeesToMinor } from "@/lib/format";
-import { MODULE_KEYS, PUBLIC_FIELDS, type PortalConfig } from "@/lib/portal-config";
+import { PUBLIC_FIELDS } from "@/lib/portal-config";
 import { PERMISSIONS, ROLES } from "@/lib/permissions";
 import { parseCsv, sheetToRecords } from "@/lib/student-import";
 import { bool, int, list, optStr, str, tenantAction } from "../action";
@@ -20,6 +20,7 @@ import * as people from "../services/people";
 import * as settings from "../services/settings";
 import * as students from "../services/students";
 import * as timetable from "../services/timetable";
+import * as timetableImages from "../services/timetable-images";
 import * as transport from "../services/transport";
 
 /** One-time credentials are passed to the next page in a short-lived, encrypted, httpOnly cookie — never in the URL. */
@@ -310,48 +311,147 @@ export async function removeEventAction(fd: FormData) {
   });
 }
 
+// ---------------------------------------------------------------- Timetable images
+
+function timetableMeta(fd: FormData): timetableImages.TimetableMeta {
+  return {
+    title: str(fd, "title"),
+    kind: str(fd, "kind") === "exam" ? "exam" : "class",
+    departmentId: optStr(fd, "departmentId"),
+    programmeId: optStr(fd, "programmeId"),
+    semester: intOrNull(fd, "semester"),
+    sectionId: optStr(fd, "sectionId"),
+    academicYear: optStr(fd, "academicYear"),
+  };
+}
+export async function uploadTimetableImageAction(fd: FormData) {
+  return tenantAction(fd, async (ctx) => {
+    const publish = str(fd, "intent") === "publish";
+    await timetableImages.createTimetableImage(ctx, timetableMeta(fd), fileOrNull(fd, "image"), publish);
+    return publish ? "Timetable uploaded and published." : "Timetable uploaded as a draft.";
+  });
+}
+export async function updateTimetableImageAction(fd: FormData) {
+  return tenantAction(fd, async (ctx) => {
+    const replacement = fileOrNull(fd, "image");
+    await timetableImages.updateTimetableImage(ctx, str(fd, "id"), timetableMeta(fd), replacement);
+    return replacement ? "Timetable image replaced. The previous version is kept in history." : "Timetable details saved.";
+  });
+}
+export async function timetableImageStatusAction(fd: FormData) {
+  return tenantAction(fd, async (ctx) => {
+    const action = str(fd, "action") as "publish" | "unpublish" | "archive" | "restore" | "delete";
+    await timetableImages.setTimetableImageStatus(ctx, str(fd, "id"), action);
+    if (action === "delete") return { message: "Timetable deleted.", to: `/c/${ctx.institution.slug}/admin/timetable` };
+    return `Timetable ${{ publish: "published", unpublish: "unpublished", archive: "archived", restore: "restored as draft" }[action] ?? "updated"}.`;
+  });
+}
+
 // ---------------------------------------------------------------- Notices
+
+function noticeFromForm(fd: FormData): notices.NoticeInput {
+  const scope = str(fd, "scope") === "targeted" ? "targeted" : "all";
+  const audienceType = str(fd, "audienceType") === "teachers" ? "teachers" : "students";
+  return {
+    title: str(fd, "title"),
+    body: str(fd, "body"),
+    category: str(fd, "category") as never,
+    pinned: bool(fd, "pinned"),
+    publishAt: dateOrNull(fd, "publishAt"),
+    expiresAt: dateOrNull(fd, "expiresAt"),
+    publish: str(fd, "intent") === "publish",
+    notifyEmail: bool(fd, "notifyEmail"),
+    audienceType,
+    imagePosition: (["top", "center", "bottom"].includes(str(fd, "imagePosition")) ? str(fd, "imagePosition") : "center") as "center",
+    audience:
+      audienceType === "teachers"
+        ? { scope, departmentIds: list(fd, "departmentIds") }
+        : { scope, departmentIds: list(fd, "departmentIds"), programmeIds: list(fd, "programmeIds"), semesters: list(fd, "semesters").map(Number), sectionIds: list(fd, "sectionIds"), studentIds: [] },
+  };
+}
+
+const fileOrNull = (fd: FormData, k: string) => {
+  const f = fd.get(k);
+  return f instanceof File && f.size > 0 ? f : null;
+};
 
 export async function createNoticeAction(fd: FormData) {
   return tenantAction(fd, async (ctx) => {
-    const scope = str(fd, "scope") === "targeted" ? "targeted" : "all";
-    const n = await notices.createNotice(
-      ctx,
-      {
-        title: str(fd, "title"),
-        body: str(fd, "body"),
-        category: str(fd, "category") as never,
-        pinned: bool(fd, "pinned"),
-        publishAt: dateOrNull(fd, "publishAt"),
-        expiresAt: dateOrNull(fd, "expiresAt"),
-        publish: str(fd, "intent") === "publish",
-        notifyEmail: bool(fd, "notifyEmail"),
-        audience: { scope, departmentIds: list(fd, "departmentIds"), programmeIds: list(fd, "programmeIds"), semesters: list(fd, "semesters").map(Number), sectionIds: list(fd, "sectionIds"), studentIds: [] },
-      },
-      fd.get("attachment") as File | null,
-    );
-    return n.status === "published" ? "Notice published." : "Draft saved.";
+    const input = noticeFromForm(fd);
+    const n = await notices.createNotice(ctx, input, fileOrNull(fd, "attachment"), fileOrNull(fd, "image"));
+    const to = `/c/${ctx.institution.slug}/admin/notices?tab=${input.audienceType}`;
+    return { message: n.status === "published" ? `Notice published to ${input.audienceType}.` : "Draft saved.", to };
+  });
+}
+export async function updateNoticeAction(fd: FormData) {
+  return tenantAction(fd, async (ctx) => {
+    const input = noticeFromForm(fd);
+    const n = await notices.updateNotice(ctx, str(fd, "id"), { ...input, majorUpdate: bool(fd, "majorUpdate") }, { image: fileOrNull(fd, "image"), removeImage: bool(fd, "removeImage"), attachment: fileOrNull(fd, "attachment") });
+    return { message: n.status === "published" ? "Notice updated." : "Draft saved.", to: `/c/${ctx.institution.slug}/admin/notices?tab=${n.audienceType}` };
   });
 }
 export async function noticeStatusAction(fd: FormData) {
   return tenantAction(fd, async (ctx) => {
-    const action = str(fd, "action") as "publish" | "unpublish" | "pin" | "unpin" | "delete";
+    const action = str(fd, "action") as "publish" | "unpublish" | "pin" | "unpin" | "archive" | "delete";
     await notices.setNoticeStatus(ctx, str(fd, "id"), action);
-    return `Notice ${action === "delete" ? "deleted" : action + "ed"}.`;
+    const done = { publish: "published", unpublish: "unpublished", pin: "pinned", unpin: "unpinned", archive: "archived", delete: "deleted" }[action];
+    return `Notice ${done ?? "updated"}.`;
   });
 }
 
 // ---------------------------------------------------------------- Coursework
 
+const filesOf = (fd: FormData, k: string) => fd.getAll(k).filter((f): f is File => f instanceof File && f.size > 0);
+
 export async function createCourseworkAction(fd: FormData) {
   return tenantAction(fd, async (ctx) => {
     const [subjectId, sectionId] = str(fd, "class").split(":");
-    await coursework.createCoursework(
+    const kind = str(fd, "kind") === "material" ? "material" : "assignment";
+    const images = filesOf(fd, "images");
+    if (kind === "assignment" && !images.length) throw badRequest("Add at least one assignment image (JPG, PNG or WebP).");
+    const row = await coursework.createCoursework(
       ctx,
-      { subjectId, sectionId, kind: str(fd, "kind") as never, title: str(fd, "title"), instructions: optStr(fd, "instructions"), dueAt: dateOrNull(fd, "dueAt"), maxMarks: intOrNull(fd, "maxMarks"), acceptSubmissions: bool(fd, "acceptSubmissions") },
-      fd.get("attachment") as File | null,
+      {
+        subjectId,
+        sectionId,
+        kind,
+        title: str(fd, "title"),
+        instructions: optStr(fd, "instructions"),
+        dueAt: dateOrNull(fd, "dueAt"),
+        maxMarks: intOrNull(fd, "maxMarks"),
+        acceptSubmissions: bool(fd, "acceptSubmissions"),
+        status: str(fd, "intent") === "draft" ? "draft" : "published",
+      },
+      fileOrNull(fd, "attachment"),
+      images,
     );
-    return "Published to the class.";
+    return { message: row.status === "published" ? "Published to the class." : "Saved as draft.", to: `/c/${ctx.institution.slug}/admin/coursework/${row.id}` };
+  });
+}
+export async function updateCourseworkAction(fd: FormData) {
+  return tenantAction(fd, async (ctx) => {
+    await coursework.updateCoursework(ctx, str(fd, "id"), { title: str(fd, "title"), instructions: optStr(fd, "instructions"), dueAt: dateOrNull(fd, "dueAt"), maxMarks: intOrNull(fd, "maxMarks") });
+    return "Assignment updated.";
+  });
+}
+export async function addCourseworkImagesAction(fd: FormData) {
+  return tenantAction(fd, async (ctx) => {
+    await coursework.addCourseworkImages(ctx, str(fd, "id"), filesOf(fd, "images"));
+    return "Images added.";
+  });
+}
+export async function removeCourseworkFileAction(fd: FormData) {
+  return tenantAction(fd, async (ctx) => {
+    await coursework.removeCourseworkFile(ctx, str(fd, "id"), str(fd, "fileId"));
+    return "Image removed.";
+  });
+}
+export async function courseworkStatusAction(fd: FormData) {
+  return tenantAction(fd, async (ctx) => {
+    const action = str(fd, "action") as "publish" | "unpublish" | "archive" | "delete";
+    await coursework.setCourseworkStatus(ctx, str(fd, "id"), action);
+    if (action === "delete") return { message: "Assignment deleted.", to: `/c/${ctx.institution.slug}/admin/coursework` };
+    return `Assignment ${{ publish: "published", unpublish: "unpublished", archive: "archived" }[action] ?? "updated"}.`;
   });
 }
 export async function gradeSubmissionAction(fd: FormData) {
@@ -492,43 +592,10 @@ export async function cardOpAction(fd: FormData) {
 
 // ---------------------------------------------------------------- Portal designer & settings
 
-export async function savePortalDraftAction(fd: FormData) {
+export async function savePublicFieldsAction(fd: FormData) {
   return tenantAction(fd, async (ctx) => {
-    const modules: PortalConfig["modules"] = {};
-    for (const key of MODULE_KEYS) {
-      modules[key] = {
-        enabled: bool(fd, `mod_${key}_enabled`),
-        order: Number(str(fd, `mod_${key}_order`) || 0),
-        departmentIds: list(fd, `mod_${key}_dept`),
-        programmeIds: list(fd, `mod_${key}_prog`),
-      };
-    }
-    const cfg: PortalConfig = {
-      branding: { primaryColor: str(fd, "primaryColor"), accentColor: str(fd, "accentColor"), welcomeMessage: str(fd, "welcomeMessage"), logoFileId: ctx.draftConfig.branding.logoFileId },
-      modules,
-      publicFields: list(fd, "publicFields").filter((f) => PUBLIC_FIELDS.some((p) => p.key === f)),
-    };
-    await settings.saveDraftConfig(ctx, cfg);
-    const logo = fd.get("logo");
-    if (logo instanceof File && logo.size > 0) await settings.uploadLogo(ctx, logo);
-    if (str(fd, "intent") === "publish") {
-      const { loadTenantContext } = await import("../context");
-      await settings.publishConfig(await loadTenantContext(ctx.user as never, ctx.institution.slug));
-      return "Configuration published. Students see the changes on their next page load.";
-    }
-    return "Draft saved. Preview it, then publish.";
-  });
-}
-export async function publishPortalAction(fd: FormData) {
-  return tenantAction(fd, async (ctx) => {
-    await settings.publishConfig(ctx);
-    return "Configuration published.";
-  });
-}
-export async function discardDraftAction(fd: FormData) {
-  return tenantAction(fd, async (ctx) => {
-    await settings.discardDraft(ctx);
-    return "Draft discarded.";
+    await settings.savePublicFields(ctx, list(fd, "publicFields").filter((f) => PUBLIC_FIELDS.some((p) => p.key === f)));
+    return "NFC tap-page fields saved. They apply immediately.";
   });
 }
 export async function saveAcademicAction(fd: FormData) {

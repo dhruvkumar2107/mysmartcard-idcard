@@ -1,17 +1,20 @@
+import Link from "next/link";
 import { AlertTriangle, Bus, Clock, MapPin, Paperclip, Phone } from "lucide-react";
 import { ASSESSMENT_CATEGORIES } from "@/lib/academics";
-import { DAYS } from "@/lib/timetable";
 import { formatDate, formatDateTime, formatMoney, initials, nowMs, titleCase } from "@/lib/format";
 import type { studentAttendance } from "@/server/services/attendance";
 import type { publishedResultsForStudent } from "@/server/services/assessments";
 import type { studentLedger } from "@/server/services/finance";
 import type { loansForStudent, renewalEligibility } from "@/server/services/library";
 import type { transportForStudent } from "@/server/services/transport";
-import type { timetableFor, upcomingEvents } from "@/server/services/timetable";
+import type { upcomingEvents } from "@/server/services/timetable";
+import type { timetableImagesForStudent } from "@/server/services/timetable-images";
 import type { examSchedule } from "@/server/services/assessments";
 import type { noticesForStudent } from "@/server/services/notices";
 import type { courseworkForStudent } from "@/server/services/coursework";
 import { Alert, Badge, Card, EmptyState, Meter, StatusBadge, Table, Td, Th, cn } from "./ui";
+import { Gallery, ImageViewer } from "./media";
+import { RichText, plainPreview } from "./rich-text";
 
 type A<T extends (...args: never[]) => unknown> = Awaited<ReturnType<T>>;
 
@@ -181,11 +184,12 @@ export function AttendanceView({ data }: { data: A<typeof studentAttendance> }) 
 
 // ---------------------------------------------------------------- Results
 
-export function ResultsView({ data }: { data: A<typeof publishedResultsForStudent> }) {
+export function ResultsView({ data, showCgpa }: { data: A<typeof publishedResultsForStudent>; showCgpa: boolean }) {
   const exams = data.assessments.filter((a) => EXAM_CATS.has(a.category));
   if (!data.semesters.length && !exams.length) return <EmptyState title="No published results yet" description="Results appear here once the examination cell publishes them." />;
   return (
     <div className="space-y-5">
+      {showCgpa && (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <Card>
           <div className="text-xs font-medium uppercase tracking-wide text-muted">CGPA</div>
@@ -200,6 +204,7 @@ export function ResultsView({ data }: { data: A<typeof publishedResultsForStuden
           </Card>
         ))}
       </div>
+      )}
       {data.semesters.map((sem) => (
         <Card key={sem.semester} title={`Semester ${sem.semester} — subject performance`} padded={false}>
           <Table>
@@ -288,11 +293,19 @@ function AssessmentTable({ title, rows }: { title: string; rows: A<typeof publis
 
 // ---------------------------------------------------------------- Timetable
 
-export function TimetableView({ slots, events, exams }: { slots: A<typeof timetableFor>; events: A<typeof upcomingEvents>; exams: A<typeof examSchedule> }) {
-  const today = new Date().getDay();
-  const days = [1, 2, 3, 4, 5, 6].filter((d) => slots.some((s) => s.entry.dayOfWeek === d));
+export function TimetableView({ images, events, exams, fileHref, downloadHref }: { images: A<typeof timetableImagesForStudent>; events: A<typeof upcomingEvents>; exams: A<typeof examSchedule>; fileHref: (id: string) => string; downloadHref: (id: string) => string }) {
+  const classTt = images.filter((i) => i.t.kind === "class");
+  const examTt = images.filter((i) => i.t.kind === "exam");
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      {classTt.length === 0 ? (
+        <EmptyState title="No timetable published yet" description="Your class timetable appears here as soon as the college uploads it for your department, semester and section." />
+      ) : (
+        classTt.map((i) => <TimetableImageCard key={i.t.id} item={i} fileHref={fileHref} downloadHref={downloadHref} />)
+      )}
+      {examTt.map((i) => (
+        <TimetableImageCard key={i.t.id} item={i} fileHref={fileHref} downloadHref={downloadHref} />
+      ))}
       {events.length > 0 && (
         <Card title="Holidays & schedule changes" padded={false}>
           <ul className="divide-y divide-line">
@@ -311,42 +324,8 @@ export function TimetableView({ slots, events, exams }: { slots: A<typeof timeta
           </ul>
         </Card>
       )}
-      {days.length === 0 ? (
-        <EmptyState title="No timetable published for your section yet" />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {days.map((d) => (
-            <Card key={d} title={<span className={d === today ? "text-brand" : ""}>{DAYS[d]}{d === today ? " · Today" : ""}</span>} padded={false}>
-              <ul className="divide-y divide-line">
-                {slots
-                  .filter((s) => s.entry.dayOfWeek === d)
-                  .map((s) => (
-                    <li key={s.entry.id} className="flex gap-3 px-5 py-3 text-sm">
-                      <span className="w-24 shrink-0 tabular-nums text-muted">
-                        {s.entry.startTime}–{s.entry.endTime}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block font-medium">
-                          {s.subjectCode} {s.subjectKind === "lab" && <Badge tone="blue">Lab</Badge>}
-                        </span>
-                        <span className="block truncate text-muted">{s.subjectName}</span>
-                        <span className="block text-xs text-muted">
-                          {s.facultyName ?? "TBA"} · {s.entry.room}
-                        </span>
-                      </span>
-                    </li>
-                  ))}
-              </ul>
-            </Card>
-          ))}
-        </div>
-      )}
-      <Card title="Examination timetable" padded={false}>
-        {exams.length === 0 ? (
-          <div className="p-5">
-            <EmptyState title="No upcoming examinations scheduled" />
-          </div>
-        ) : (
+      {exams.length > 0 && (
+        <Card title="Upcoming examinations" padded={false}>
           <Table>
             <thead>
               <tr>
@@ -371,105 +350,185 @@ export function TimetableView({ slots, events, exams }: { slots: A<typeof timeta
               ))}
             </tbody>
           </Table>
-        )}
-      </Card>
+        </Card>
+      )}
     </div>
+  );
+}
+
+function TimetableImageCard({ item, fileHref, downloadHref }: { item: A<typeof timetableImagesForStudent>[number]; fileHref: (id: string) => string; downloadHref: (id: string) => string }) {
+  const t = item.t;
+  return (
+    <section aria-label={t.title}>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h2 className="text-base font-semibold">{t.title}</h2>
+        <Badge tone={t.kind === "exam" ? "amber" : "blue"}>{t.kind === "exam" ? "Examination timetable" : "Class timetable"}</Badge>
+        {t.academicYear && <Badge>{t.academicYear}</Badge>}
+        <span className="text-xs text-muted">Updated {formatDate(t.updatedAt)}</span>
+      </div>
+      <ImageViewer src={fileHref(item.file.id)} alt={t.title} downloadHref={downloadHref(item.file.id)} />
+    </section>
   );
 }
 
 // ---------------------------------------------------------------- Notices
 
-export function NoticesView({ notices, fileHref }: { notices: A<typeof noticesForStudent>; fileHref: (id: string) => string }) {
+type NoticeLike = A<typeof noticesForStudent>[number] & { unread?: boolean };
+
+/** Notice feed card: image, title, preview, date, category and an unread dot. */
+export function NoticeCard({ n, href, fileHref }: { n: NoticeLike; href?: string; fileHref: (id: string) => string }) {
+  const body = (
+    <article className={cn("group flex h-full flex-col overflow-hidden rounded-2xl border bg-surface shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition", href && "hover:-translate-y-0.5 hover:shadow-md", n.unread ? "border-brand/40" : "border-line")}>
+      {n.imageFileId && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={fileHref(n.imageFileId)} alt="" loading="lazy" className="aspect-[16/9] w-full bg-surface-2 object-cover" style={{ objectPosition: n.imagePosition }} />
+      )}
+      <div className="flex flex-1 flex-col p-4">
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {n.unread && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 text-[11px] font-semibold text-white">
+              <span className="h-1.5 w-1.5 rounded-full bg-white" aria-hidden /> New
+            </span>
+          )}
+          {n.pinned && <Badge tone="violet">Pinned</Badge>}
+          <Badge tone="blue">{titleCase(n.category)}</Badge>
+        </div>
+        <h3 className={cn("leading-snug", n.unread ? "font-semibold" : "font-medium")}>{n.title}</h3>
+        <p className="mt-1.5 line-clamp-3 text-sm text-muted">{plainPreview(n.body)}</p>
+        <div className="mt-auto flex items-center justify-between gap-2 pt-3 text-xs text-muted">
+          <time dateTime={n.publishAt?.toISOString()}>{formatDate(n.publishAt)}</time>
+          {n.attachments.length > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <Paperclip className="h-3.5 w-3.5" aria-hidden /> {n.attachments.length}
+            </span>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+  return href ? (
+    <Link href={href} className="block h-full rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand" aria-label={`${n.title}${n.unread ? " (unread)" : ""}`}>
+      {body}
+    </Link>
+  ) : (
+    body
+  );
+}
+
+export function NoticesView({ notices, fileHref, hrefFor }: { notices: NoticeLike[]; fileHref: (id: string) => string; hrefFor?: (id: string) => string }) {
   if (!notices.length) return <EmptyState title="No notices" description="Announcements from your college appear here." />;
   return (
-    <ul className="space-y-3">
+    <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {notices.map((n) => (
         <li key={n.id}>
-          <article className={cn("rounded-xl border bg-surface p-4", n.pinned ? "border-brand/40" : "border-line")}>
-            <div className="mb-1 flex flex-wrap items-center gap-2">
-              {n.pinned && <Badge tone="violet">Pinned</Badge>}
-              <Badge tone="blue">{titleCase(n.category)}</Badge>
-              <span className="text-xs text-muted">{formatDateTime(n.publishAt)}</span>
-            </div>
-            <h3 className="font-semibold">{n.title}</h3>
-            <p className="mt-1 whitespace-pre-line text-sm text-ink/80">{n.body}</p>
-            {n.attachments.length > 0 && (
-              <ul className="mt-3 flex flex-wrap gap-2">
-                {n.attachments.map((a) => (
-                  <li key={a.id}>
-                    <a href={fileHref(a.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-surface-2">
-                      <Paperclip className="h-3.5 w-3.5" aria-hidden /> {a.name}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {n.expiresAt && <p className="mt-2 text-xs text-muted">Expires {formatDateTime(n.expiresAt)}</p>}
-          </article>
+          <NoticeCard n={n} href={hrefFor?.(n.id)} fileHref={fileHref} />
         </li>
       ))}
     </ul>
   );
 }
 
+/** Full notice: image, formatted text and attachments. */
+export function NoticeDetail({ n, fileHref }: { n: NoticeLike; fileHref: (id: string) => string }) {
+  return (
+    <article className="overflow-hidden rounded-2xl border border-line bg-surface">
+      {n.imageFileId && (
+        <a href={fileHref(n.imageFileId)} target="_blank" rel="noopener" className="block bg-surface-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={fileHref(n.imageFileId)} alt="Notice image" className="mx-auto max-h-[70vh] w-full object-contain" />
+        </a>
+      )}
+      <div className="p-5 sm:p-7">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {n.pinned && <Badge tone="violet">Pinned</Badge>}
+          <Badge tone="blue">{titleCase(n.category)}</Badge>
+          <time className="text-xs text-muted" dateTime={n.publishAt?.toISOString()}>
+            Published {formatDateTime(n.publishAt)}
+          </time>
+        </div>
+        <h1 className="text-xl font-semibold leading-snug sm:text-2xl">{n.title}</h1>
+        <RichText text={n.body} className="mt-4 text-[15px] leading-relaxed text-ink/90" />
+        {n.attachments.length > 0 && (
+          <ul className="mt-5 flex flex-wrap gap-2">
+            {n.attachments.map((a) => (
+              <li key={a.id}>
+                <a href={fileHref(a.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm hover:bg-surface-2">
+                  <Paperclip className="h-4 w-4" aria-hidden /> {a.name}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+        {n.expiresAt && <p className="mt-4 text-xs text-muted">Visible until {formatDateTime(n.expiresAt)}</p>}
+      </div>
+    </article>
+  );
+}
+
 // ---------------------------------------------------------------- Coursework
 
+/**
+ * Assignment gallery. Due dates appear only when the server left them in the data
+ * (i.e. the super admin enabled assignment deadlines for this college).
+ */
 export function CourseworkView({ items, fileHref, submitSlot }: { items: A<typeof courseworkForStudent>; fileHref: (id: string) => string; submitSlot?: (item: A<typeof courseworkForStudent>[number]) => React.ReactNode }) {
-  if (!items.length) return <EmptyState title="No assignments or study material yet" />;
+  if (!items.length) return <EmptyState title="No assignments yet" description="Assignments and study material from your teachers appear here." />;
   const now = nowMs();
-  const subjects = [...new Set(items.map((i) => i.subjectCode))];
   return (
-    <div className="space-y-5">
-      {subjects.map((code) => (
-        <Card key={code} title={`${code} · ${items.find((i) => i.subjectCode === code)!.subjectName}`} padded={false}>
-          <ul className="divide-y divide-line">
-            {items
-              .filter((i) => i.subjectCode === code)
-              .map((i) => {
-                const overdue = i.item.kind === "assignment" && !i.submission && i.item.dueAt && i.item.dueAt.getTime() < now;
-                return (
-                  <li key={i.item.id} className="px-5 py-4 text-sm">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone={i.item.kind === "assignment" ? "amber" : "blue"}>{i.item.kind === "assignment" ? "Assignment" : "Study material"}</Badge>
-                      <span className="font-medium">{i.item.title}</span>
-                      {overdue && <Badge tone="red">Overdue</Badge>}
-                      {i.submission && <Badge tone="green">Submitted {formatDate(i.submission.submittedAt)}</Badge>}
-                    </div>
-                    {i.item.instructions && <p className="mt-1 whitespace-pre-line text-ink/80">{i.item.instructions}</p>}
-                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted">
-                      {i.item.dueAt && (
-                        <span className="inline-flex items-center gap-1">
-                          <Clock className="h-3.5 w-3.5" aria-hidden /> Due {formatDateTime(i.item.dueAt)}
-                        </span>
-                      )}
-                      {i.item.maxMarks && <span>Max {i.item.maxMarks} marks</span>}
-                      {i.attachments.map((a) => (
-                        <a key={a.id} href={fileHref(a.id)} className="inline-flex items-center gap-1 text-brand hover:underline">
-                          <Paperclip className="h-3.5 w-3.5" aria-hidden /> {a.name}
-                        </a>
-                      ))}
-                    </div>
-                    {i.submission?.grade != null && (
-                      <div className="mt-2 rounded-lg bg-surface-2 px-3 py-2">
-                        Grade: <strong>{i.submission.grade}</strong>
-                        {i.item.maxMarks ? ` / ${i.item.maxMarks}` : ""}
-                        {i.submission.feedback && <span className="block text-muted">Feedback: {i.submission.feedback}</span>}
-                      </div>
-                    )}
-                    {submitSlot?.(i)}
-                  </li>
-                );
-              })}
-          </ul>
-        </Card>
-      ))}
-    </div>
+    <ul className="space-y-4">
+      {items.map((i) => {
+        const images = i.attachments.filter((a) => a.mimeType.startsWith("image/"));
+        const docs = i.attachments.filter((a) => !a.mimeType.startsWith("image/"));
+        const overdue = i.item.kind === "assignment" && !i.submission && i.item.dueAt && i.item.dueAt.getTime() < now;
+        return (
+          <li key={i.item.id}>
+            <article className="rounded-2xl border border-line bg-surface p-4 sm:p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={i.item.kind === "assignment" ? "amber" : "blue"}>{i.item.kind === "assignment" ? "Assignment" : "Study material"}</Badge>
+                <span className="text-xs font-medium text-muted">
+                  {i.subjectCode} · {i.subjectName}
+                </span>
+                {overdue && <Badge tone="red">Overdue</Badge>}
+                {i.submission && <Badge tone="green">Submitted {formatDate(i.submission.submittedAt)}</Badge>}
+              </div>
+              <h3 className="mt-2 text-base font-semibold">{i.item.title}</h3>
+              {i.item.instructions && <p className="mt-1 whitespace-pre-line text-sm text-ink/80">{i.item.instructions}</p>}
+              {images.length > 0 && (
+                <Gallery className="mt-3" images={images.map((a, n) => ({ id: a.id, src: fileHref(a.id), downloadHref: `${fileHref(a.id)}?download=1`, alt: `${i.item.title} — image ${n + 1}` }))} />
+              )}
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+                <span>Published {formatDate(i.item.createdAt)}</span>
+                {i.publisher && <span>By {i.publisher}</span>}
+                {i.item.dueAt && (
+                  <span className="inline-flex items-center gap-1">
+                    <Clock className="h-3.5 w-3.5" aria-hidden /> Due {formatDateTime(i.item.dueAt)}
+                  </span>
+                )}
+                {docs.map((a) => (
+                  <a key={a.id} href={fileHref(a.id)} className="inline-flex items-center gap-1 text-brand hover:underline">
+                    <Paperclip className="h-3.5 w-3.5" aria-hidden /> {a.name}
+                  </a>
+                ))}
+              </div>
+              {i.submission?.grade != null && (
+                <div className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-sm">
+                  Grade: <strong>{i.submission.grade}</strong>
+                  {i.item.maxMarks ? ` / ${i.item.maxMarks}` : ""}
+                  {i.submission.feedback && <span className="block text-muted">Feedback: {i.submission.feedback}</span>}
+                </div>
+              )}
+              {submitSlot?.(i)}
+            </article>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
 // ---------------------------------------------------------------- Fees
 
-export function FeesView({ ledger, receiptHref }: { ledger: A<typeof studentLedger>; receiptHref: (id: string) => string }) {
+export function FeesView({ ledger, receiptHref, showDue }: { ledger: A<typeof studentLedger>; receiptHref: (id: string) => string; showDue: boolean }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-3 gap-3">
@@ -497,7 +556,7 @@ export function FeesView({ ledger, receiptHref }: { ledger: A<typeof studentLedg
               <tr>
                 <Th>Category</Th>
                 <Th>Description</Th>
-                <Th>Due date</Th>
+                {showDue && <Th>Due date</Th>}
                 <Th>Amount</Th>
                 <Th>Paid</Th>
                 <Th>Status</Th>
@@ -508,7 +567,7 @@ export function FeesView({ ledger, receiptHref }: { ledger: A<typeof studentLedg
                 <tr key={d.id}>
                   <Td>{titleCase(d.category)}</Td>
                   <Td>{d.description ?? "—"}</Td>
-                  <Td className="tabular-nums">{formatDate(d.dueDate)}</Td>
+                  {showDue && <Td className="tabular-nums">{formatDate(d.dueDate)}</Td>}
                   <Td className="tabular-nums">{formatMoney(d.amount)}</Td>
                   <Td className="tabular-nums">{formatMoney(d.paid)}</Td>
                   <Td>
