@@ -42,7 +42,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     headers: {
       "Content-Type": f.file.mimeType,
       "Content-Length": String(body.length),
-      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(f.file.originalName)}"`,
+      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${f.file.originalName.replace(/[^\x20-\x7e]|["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(f.file.originalName)}`,
       "Cache-Control": publicFile ? "public, max-age=3600" : "private, no-store",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",

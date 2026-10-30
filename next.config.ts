@@ -15,6 +15,8 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@electric-sql/pglite", "pg", "bcryptjs"],
   experimental: { serverActions: { bodySizeLimit: "4.5mb" } },
   turbopack: {
+    // Pin the workspace root so a stray lockfile in a parent directory is never picked up.
+    root: import.meta.dirname,
     rules: {
       "*.css": {
         loaders: ["@tailwindcss/turbopack"],

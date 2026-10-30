@@ -147,7 +147,14 @@ export async function updateNotice(ctx: TenantContext, id: string, input: Notice
     })
     .where(and(eq(notices.id, n.id), eq(notices.institutionId, ctx.institution.id)))
     .returning();
+  // The previous image is no longer referenced by anything once replaced or removed.
+  if (n.imageFileId && n.imageFileId !== imageFileId) {
+    const [old] = await getDb().delete(files).where(and(eq(files.id, n.imageFileId), eq(files.institutionId, ctx.institution.id))).returning();
+    if (old) await storage().remove(old.storageKey);
+  }
   await audit(ctx, { action: bump ? "notice.major_update" : "notice.update", entityType: "notice", entityId: n.id, summary: `${bump ? "Major update to" : "Edited"} notice "${row.title}"` });
+  // Publishing a draft from the editor notifies just like the Publish button does.
+  if (!wasPublished && row.status === "published" && row.notifyEmail && row.audienceType === "students") await queueNoticeEmails(ctx, row);
   return row;
 }
 
@@ -384,8 +391,13 @@ export async function markNoticeRead(ctx: TenantContext, v: NoticeViewer, id: st
     .onConflictDoUpdate({ target: [noticeReads.noticeId, noticeReads.userId], set: { revision: n.revision, readAt: new Date() } });
 }
 
+/** Dashboard list: notice managers see everything live; other staff only the teacher notices addressed to them. */
 export async function recentLiveNotices(ctx: TenantContext, limit = 5) {
-  return getDb().select().from(notices).where(and(...liveConditions(ctx))).orderBy(desc(notices.pinned), desc(notices.publishAt)).limit(limit);
+  const db = getDb();
+  if (ctx.perms.has("notices.publish")) return db.select().from(notices).where(and(...liveConditions(ctx))).orderBy(desc(notices.pinned), desc(notices.publishAt)).limit(limit);
+  const viewer: NoticeViewer = (await noticeViewer(ctx)) ?? { kind: "teacher", departmentId: null };
+  if (viewer.kind !== "teacher") return [];
+  return (await liveFor(ctx, viewer)).slice(0, limit);
 }
 
 export async function noticeCounts(ctx: TenantContext) {

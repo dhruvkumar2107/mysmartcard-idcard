@@ -330,6 +330,43 @@ describe("student vs teacher notices, unread badges and read receipts (12–18)"
     expect(ids).not.toContain(d.id);
     expect(ids).not.toContain(a.id);
   });
+
+  it("publishing a draft from the editor queues emails like the Publish button", async () => {
+    const outbox = async () => (await getDb().select().from(schema.notificationOutbox).where(eq(schema.notificationOutbox.institutionId, nb))).length;
+    const d = await notices.createNotice(A, { ...base, title: "Email on edit-publish", publish: false, notifyEmail: true });
+    const before = await outbox();
+    await notices.updateNotice(A, d.id, { ...base, title: "Email on edit-publish", notifyEmail: true });
+    const after = await outbox();
+    expect(after).toBeGreaterThan(before);
+    // Editing an already-published notice does not email again.
+    await notices.updateNotice(A, d.id, { ...base, title: "Email on edit-publish (edited)", notifyEmail: true });
+    expect(await outbox()).toBe(after);
+  });
+
+  it("replacing or removing a notice image deletes the old file", async () => {
+    const n = await notices.createNotice(A, { ...base, title: "Image swap" }, null, png("first.png"));
+    const fileExists = async (id: string) => (await getDb().select().from(schema.files).where(eq(schema.files.id, id))).length > 0;
+    const first = n.imageFileId!;
+    const swapped = await notices.updateNotice(A, n.id, { ...base, title: "Image swap" }, { image: png("second.png") });
+    expect(swapped.imageFileId).not.toBe(first);
+    expect(await fileExists(first)).toBe(false);
+    const removed = await notices.updateNotice(A, n.id, { ...base, title: "Image swap" }, { removeImage: true });
+    expect(removed.imageFileId).toBeNull();
+    expect(await fileExists(swapped.imageFileId!)).toBe(false);
+  });
+
+  it("the staff dashboard only lists notices addressed to that staff member", async () => {
+    const fac = await ctxFor("faculty2@northbridge.test", "northbridge");
+    const fv = (await notices.noticeViewer(fac))!;
+    if (fv.kind !== "teacher") throw new Error("unexpected");
+    const otherDept = (await getDb().select().from(schema.departments).where(eq(schema.departments.institutionId, nb))).find((d) => d.id !== fv.departmentId)!;
+    const hidden = await notices.createNotice(A, { ...base, title: "Other department staff only", audienceType: "teachers", audience: { scope: "targeted", departmentIds: [otherDept.id] } });
+    const student = await notices.createNotice(A, { ...base, title: "Students only (dashboard)" });
+    const ids = (await notices.recentLiveNotices(fac, 100)).map((n) => n.id);
+    expect(ids).not.toContain(hidden.id);
+    expect(ids).not.toContain(student.id);
+    expect((await notices.recentLiveNotices(A, 100)).map((n) => n.id)).toContain(hidden.id);
+  });
 });
 
 describe("image assignments (19–20)", () => {
