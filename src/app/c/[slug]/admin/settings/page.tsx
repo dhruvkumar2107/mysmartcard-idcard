@@ -1,7 +1,8 @@
-import { Alert, Card, Field, Flash, Input, KV, PageHeader, StatusBadge, Textarea, TenantFields } from "@/components/ui";
+import { Alert, Card, Field, Flash, Input, KV, PageHeader, Select, StatusBadge, Textarea, TenantFields } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
 import { saveIdCardDetailsAction } from "@/server/actions/admin";
 import { MODULES } from "@/lib/portal-config";
+import { INDIAN_STATES, planLabel, PLANS, type PlanKey } from "@/lib/plans";
 import { flashOf, type SlugProps } from "@/lib/page";
 import { requireTenant } from "@/server/session";
 
@@ -21,7 +22,7 @@ export default async function SettingsPage({ params, searchParams }: SlugProps) 
             items={[
               ["College", i.name],
               ["Workspace URL", `/c/${i.slug}`],
-              ["Plan", i.plan],
+              ["Plan", PLANS[i.plan as PlanKey] ? `${planLabel(i.plan)} — ${PLANS[i.plan as PlanKey].summary}` : i.plan],
               ["Status", <StatusBadge key="s" status={i.status} />],
               ["Student limit", i.studentLimit.toLocaleString("en-IN")],
               ["Licensed modules", i.licensedModules.map((k) => MODULES.find((m) => m.key === k)?.label ?? k).join(", ")],
@@ -41,11 +42,20 @@ export default async function SettingsPage({ params, searchParams }: SlugProps) 
       </div>
       {ctx.perms.has("portal.configure") && (
         <div className="mt-6">
-          <Card title="ID card details" description="Printed on every student ID card: college address, contact number and the principal's signature.">
+          <Card title="ID card details" description="Printed on every student ID card: college address (with city, state and PIN code), contact number and the principal's signature.">
             <form action={saveIdCardDetailsAction} encType="multipart/form-data" className="grid gap-4 sm:grid-cols-2">
               <TenantFields slug={slug} back={`/c/${slug}/admin/settings`} />
               <Field label="College address" className="sm:col-span-2">
                 <Textarea name="address" rows={2} maxLength={300} defaultValue={i.address ?? ""} />
+              </Field>
+              <Field label="City">
+                <Input name="city" maxLength={80} defaultValue={i.city ?? ""} />
+              </Field>
+              <Field label="State">
+                <Select name="state" placeholder="Select state" defaultValue={i.state ?? ""} options={INDIAN_STATES.map((st) => ({ value: st, label: st }))} />
+              </Field>
+              <Field label="PIN code">
+                <Input name="pincode" inputMode="numeric" pattern="[1-9][0-9]{5}" maxLength={6} title="6-digit PIN code" defaultValue={i.pincode ?? ""} />
               </Field>
               <Field label="College contact number">
                 <Input name="contactPhone" type="tel" maxLength={30} defaultValue={i.contactPhone ?? ""} />

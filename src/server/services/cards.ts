@@ -235,7 +235,7 @@ export type PublicCardView =
   | { state: "inactive"; institution: { name: string; slug: string } }
   | {
       state: "ok";
-      institution: { name: string; shortName: string; slug: string; collegeAddress: string | null; contactPhone: string | null; principalName: string | null; principalSignatureFileId: string | null };
+      institution: { name: string; shortName: string; slug: string; collegeAddress: string | null; city: string | null; state: string | null; pincode: string | null; contactPhone: string | null; principalName: string | null; principalSignatureFileId: string | null };
       branding: { primaryColor: string; accentColor: string; logoFileId: string | null };
       fields: Record<string, string | null>;
       photoAvailable: boolean;
@@ -307,6 +307,9 @@ export async function resolveCardToken(token: string, opts: { countTap?: boolean
       slug: row.institution.slug,
       // College details printed on every card; not student data.
       collegeAddress: row.institution.address,
+      city: row.institution.city,
+      state: row.institution.state,
+      pincode: row.institution.pincode,
       contactPhone: row.institution.contactPhone,
       principalName: row.institution.principalName,
       principalSignatureFileId: row.institution.principalSignatureFileId,

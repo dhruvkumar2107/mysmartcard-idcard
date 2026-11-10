@@ -4,6 +4,7 @@ import { z } from "zod";
 import { auditLogs, files, institutions, institutionSettings, portalConfigHistory, supportGrants, users } from "@/db/schema";
 import { newStorageKey, storage, validateUpload } from "@/lib/storage";
 import { badRequest } from "@/lib/errors";
+import { PINCODE_RE } from "@/lib/plans";
 import { PERMISSIONS, ROLES, DEFAULT_ROLE_PERMISSIONS, type Role } from "@/lib/permissions";
 import { academicSettingsSchema, normalizeConfig, PUBLIC_FIELDS, type AcademicSettings } from "@/lib/portal-config";
 import { audit } from "../audit";
@@ -35,6 +36,9 @@ export async function savePublicFields(ctx: TenantContext, fields: string[]) {
 
 const idCardDetailsInput = z.object({
   address: z.string().trim().max(300).nullable(),
+  city: z.string().trim().max(80).nullish(),
+  state: z.string().trim().max(80).nullish(),
+  pincode: z.string().trim().regex(PINCODE_RE, "PIN code must be 6 digits").nullish(),
   contactPhone: z.string().trim().max(30).nullable(),
   principalName: z.string().trim().max(120).nullable(),
 });

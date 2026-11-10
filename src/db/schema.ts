@@ -38,6 +38,8 @@ export const institutions = pgTable("institutions", {
   contactEmail: text("contact_email"),
   /** Printed on student ID cards. */
   address: text("address"),
+  state: text("state"),
+  pincode: text("pincode"),
   contactPhone: text("contact_phone"),
   principalName: text("principal_name"),
   /** A `files` row with owner_type "branding" (public), shown on the ID card. */

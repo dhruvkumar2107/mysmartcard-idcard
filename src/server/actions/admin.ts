@@ -607,7 +607,7 @@ export async function saveIdCardDetailsAction(fd: FormData) {
     const sig = fd.get("signature");
     await settings.saveIdCardDetails(
       ctx,
-      { address: optStr(fd, "address"), contactPhone: optStr(fd, "contactPhone"), principalName: optStr(fd, "principalName") },
+      { address: optStr(fd, "address"), city: optStr(fd, "city"), state: optStr(fd, "state"), pincode: optStr(fd, "pincode"), contactPhone: optStr(fd, "contactPhone"), principalName: optStr(fd, "principalName") },
       sig instanceof File ? sig : null,
       bool(fd, "removeSignature"),
     );

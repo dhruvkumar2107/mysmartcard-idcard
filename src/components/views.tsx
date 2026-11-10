@@ -15,6 +15,7 @@ import type { courseworkForStudent } from "@/server/services/coursework";
 import { Alert, Badge, Card, EmptyState, Meter, StatusBadge, Table, Td, Th, cn } from "./ui";
 import { Gallery, ImageViewer } from "./media";
 import { RichText, plainPreview } from "./rich-text";
+import { fullAddress } from "@/lib/plans";
 
 type A<T extends (...args: never[]) => unknown> = Awaited<ReturnType<T>>;
 
@@ -33,11 +34,14 @@ export type IdCardCollege = {
   signatureUrl?: string | null;
 };
 
-export function idCardCollege(inst: { name: string; address?: string | null; contactPhone?: string | null; principalName?: string | null; principalSignatureFileId?: string | null }, logoFileId: string | null | undefined): IdCardCollege {
+export function idCardCollege(
+  inst: { name: string; address?: string | null; city?: string | null; state?: string | null; pincode?: string | null; contactPhone?: string | null; principalName?: string | null; principalSignatureFileId?: string | null },
+  logoFileId: string | null | undefined,
+): IdCardCollege {
   return {
     name: inst.name,
     logoUrl: logoFileId ? `/api/files/${logoFileId}` : null,
-    address: inst.address,
+    address: fullAddress(inst),
     contactPhone: inst.contactPhone,
     principalName: inst.principalName,
     signatureUrl: inst.principalSignatureFileId ? `/api/files/${inst.principalSignatureFileId}` : null,
@@ -101,7 +105,7 @@ export function DigitalIdCard({
         ) : null}
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{college.name}</div>
-          {college.address && <div className="truncate text-[11px] text-white/80">{college.address}</div>}
+          {college.address && <div className="line-clamp-2 text-[11px] leading-tight text-white/80">{college.address}</div>}
           {college.contactPhone && <div className="text-[11px] text-white/80">Ph: {college.contactPhone}</div>}
           <div className="text-[11px] uppercase tracking-wider text-white/70">Student identity card</div>
         </div>

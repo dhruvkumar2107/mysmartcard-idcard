@@ -1,3 +1,4 @@
+import { planLabel } from "@/lib/plans";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { Badge, Card, Flash, LinkButton, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/ui";
@@ -56,7 +57,7 @@ export default async function PlatformHome({ searchParams }: Props) {
                   <div className="font-mono text-xs text-muted">/c/{r.inst.slug}</div>
                 </Td>
                 <Td>
-                  <Badge tone="blue">{r.inst.plan}</Badge>
+                  <Badge tone="blue">{planLabel(r.inst.plan)}</Badge>
                 </Td>
                 <Td className="tabular-nums">
                   {r.studentCount} / {r.inst.studentLimit}

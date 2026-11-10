@@ -11,23 +11,37 @@ async function stash(msg: string) {
   (await cookies()).set("msc_onetime", encrypt(msg), { httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production", path: "/platform", maxAge: 300 });
 }
 
+/** Address and contact fields shared by onboarding and the college details form. Blank = null. */
+function details(fd: FormData) {
+  const opt = (k: string) => str(fd, k) || null;
+  return {
+    address: opt("address"),
+    city: opt("city"),
+    state: opt("state"),
+    pincode: opt("pincode"),
+    contactEmail: opt("contactEmail"),
+    contactPhone: opt("contactPhone"),
+    principalName: opt("principalName"),
+  };
+}
+
 export async function createInstitutionAction(fd: FormData) {
   return userAction(fd, "/platform/colleges/new", async (user) => {
     const res = await createInstitution(user, {
       name: str(fd, "name"),
       shortName: str(fd, "shortName"),
       slug: str(fd, "slug"),
-      city: str(fd, "city") || null,
-      contactEmail: str(fd, "contactEmail") || null,
-      plan: str(fd, "plan") as "standard",
+      ...details(fd),
+      plan: str(fd, "plan") || null,
       licensedModules: list(fd, "modules"),
-      studentLimit: Number(str(fd, "studentLimit")),
-      adminName: str(fd, "adminName"),
-      adminEmail: str(fd, "adminEmail"),
+      studentLimit: str(fd, "studentLimit") ? Number(str(fd, "studentLimit")) : null,
+      adminName: str(fd, "adminName") || null,
+      adminEmail: str(fd, "adminEmail") || null,
       adminPassword: str(fd, "adminPassword") || null,
     });
-    await stash(res.tempPassword ? `College admin login — ${res.adminEmail} / ${res.tempPassword}` : `${res.adminEmail} already had an account and was added as college admin (existing password unchanged).`);
-    return { message: `${res.institution.name} onboarded.`, to: `/platform/colleges/${res.institution.id}` };
+    if (res.adminEmail) await stash(res.tempPassword ? `College admin login — ${res.adminEmail} / ${res.tempPassword}` : `${res.adminEmail} already had an account and was added as college admin (existing password unchanged).`);
+    const note = res.adminEmail ? "" : " No administrator yet: add one under College admin credentials when you have their email.";
+    return { message: `${res.institution.name} onboarded at /c/${res.institution.slug}.${note}`, to: `/platform/colleges/${res.institution.id}` };
   });
 }
 
@@ -41,14 +55,14 @@ export async function setInstitutionStatusAction(fd: FormData) {
 
 export async function updateSubscriptionAction(fd: FormData) {
   return userAction(fd, "/platform", async (user) => {
-    await updateSubscription(user, str(fd, "id"), { plan: str(fd, "plan"), licensedModules: list(fd, "modules"), studentLimit: Number(str(fd, "studentLimit")) });
+    await updateSubscription(user, str(fd, "id"), { plan: str(fd, "plan") || null, licensedModules: list(fd, "modules"), studentLimit: str(fd, "studentLimit") ? Number(str(fd, "studentLimit")) : null });
     return "Subscription updated.";
   });
 }
 
 export async function updateInstitutionDetailsAction(fd: FormData) {
   return userAction(fd, "/platform", async (user) => {
-    await updateInstitutionDetails(user, str(fd, "id"), { name: str(fd, "name"), shortName: str(fd, "shortName"), city: str(fd, "city") || null, contactEmail: str(fd, "contactEmail") || null });
+    await updateInstitutionDetails(user, str(fd, "id"), { name: str(fd, "name"), shortName: str(fd, "shortName"), ...details(fd) });
     return "College details updated.";
   });
 }

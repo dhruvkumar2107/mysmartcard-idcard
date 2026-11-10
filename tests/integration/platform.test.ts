@@ -13,6 +13,8 @@ import { runMigrations } from "@/db/migrate";
 import { authenticate, createSession, userForSessionToken, destroySession } from "@/server/auth";
 import { loadTenantContext, type TenantContext } from "@/server/context";
 import { AppError } from "@/lib/errors";
+import { fullAddress, PLANS } from "@/lib/plans";
+import { idCardCollege } from "@/components/views";
 import { COLLEGES, DEMO_PASSWORD, seedCollege } from "../../scripts/seed-data";
 import * as students from "@/server/services/students";
 import * as cards from "@/server/services/cards";
@@ -26,7 +28,7 @@ import * as notices from "@/server/services/notices";
 import * as library from "@/server/services/library";
 import * as timetable from "@/server/services/timetable";
 import * as builder from "@/server/services/portal-builder";
-import { getInstitution, setInstitutionStatus, updateInstitutionDetails } from "@/server/services/platform";
+import { createInstitution, getInstitution, setInstitutionStatus, updateInstitutionDetails } from "@/server/services/platform";
 import { runRetention } from "@/server/services/maintenance";
 import { rateLimit, resetRateLimits } from "@/lib/rate-limit";
 
@@ -256,11 +258,13 @@ describe("NFC card lifecycle", () => {
   });
 
   it("prints college ID-card details (address, contact, principal) on the public card", async () => {
-    await settings.saveIdCardDetails(A, { address: "1 College Road, Bengaluru", contactPhone: "080 1234 5678", principalName: "Dr. P. Rao" });
+    await settings.saveIdCardDetails(A, { address: "1 College Road", city: "Bengaluru", state: "Karnataka", pincode: "560001", contactPhone: "080 1234 5678", principalName: "Dr. P. Rao" });
     A = await ctxFor("admin@northbridge.test", "northbridge");
     const [c] = (await cards.listCards(A, { status: "active" })).filter((x) => x.card.studentId);
     const view = await cards.resolveCardToken((await cards.liveTokenForCard(A, c.card.id))!.token, { countTap: false });
-    expect(view.state === "ok" && view.institution).toMatchObject({ collegeAddress: "1 College Road, Bengaluru", contactPhone: "080 1234 5678", principalName: "Dr. P. Rao" });
+    expect(view.state === "ok" && view.institution).toMatchObject({ collegeAddress: "1 College Road", city: "Bengaluru", state: "Karnataka", pincode: "560001", contactPhone: "080 1234 5678", principalName: "Dr. P. Rao" });
+    expect(view.state === "ok" && idCardCollege({ ...view.institution, address: view.institution.collegeAddress }, null).address).toBe("1 College Road, Bengaluru, Karnataka - 560001");
+    await expect(settings.saveIdCardDetails(A, { address: null, contactPhone: null, principalName: null, pincode: "ABC123" })).rejects.toThrow();
   });
 
   it("respects public-field configuration after publish", async () => {
@@ -326,13 +330,32 @@ describe("NFC card lifecycle", () => {
 });
 
 describe("platform college management", () => {
+  it("onboards a college with every field left blank, filling in defaults", async () => {
+    const [sa] = await getDb().select().from(schema.users).where(eq(schema.users.email, "platform@mysmartcard.test"));
+    const a = await createInstitution(sa, {});
+    expect(a.institution).toMatchObject({ name: "New College", shortName: "NC", slug: "new-college", plan: "standard", studentLimit: PLANS.standard.studentLimit });
+    expect(a.institution.licensedModules).toEqual(PLANS.standard.modules);
+    expect(a.adminEmail).toBeNull();
+    // A second blank onboarding gets the next free slug.
+    expect((await createInstitution(sa, {})).institution.slug).toBe("new-college-2");
+    // Only a name: short name and slug derive from it; admin name derives from the email.
+    const b = await createInstitution(sa, { name: "Government Science College", plan: "starter", adminEmail: "principal@gsc.test" });
+    expect(b.institution).toMatchObject({ shortName: "GSC", slug: "government-science-college", studentLimit: PLANS.starter.studentLimit });
+    expect(b.tempPassword).toBeTruthy();
+    // Blank name on edit keeps the current one.
+    expect((await updateInstitutionDetails(sa, b.institution.id, { name: "", shortName: "", state: "Kerala" })).name).toBe("Government Science College");
+  });
+
   it("lets only the super admin edit college details and see usage counts", async () => {
     const [sa] = await getDb().select().from(schema.users).where(eq(schema.users.email, "platform@mysmartcard.test"));
     const { usage } = await getInstitution(sa, B.institution.id);
     expect(usage.students).toBe(4);
     expect(usage.activeCards).toBeGreaterThan(0);
-    const updated = await updateInstitutionDetails(sa, B.institution.id, { name: "Riverside College of Arts", shortName: "RCA", city: "Pune", contactEmail: null });
+    const updated = await updateInstitutionDetails(sa, B.institution.id, { name: "Riverside College of Arts", shortName: "RCA", address: "12 FC Road, Shivajinagar", city: "Pune", state: "Maharashtra", pincode: "411005", contactEmail: null, contactPhone: "020 2555 0101", principalName: "Dr. S. Kulkarni" });
     expect(updated.name).toBe("Riverside College of Arts");
+    expect(updated).toMatchObject({ state: "Maharashtra", pincode: "411005", contactPhone: "020 2555 0101", principalName: "Dr. S. Kulkarni" });
+    expect(fullAddress(updated)).toBe("12 FC Road, Shivajinagar, Pune, Maharashtra - 411005");
+    await expect(updateInstitutionDetails(sa, B.institution.id, { name: "Riverside College of Arts", shortName: "RCA", pincode: "12345" })).rejects.toThrow();
     expect(updated.slug).toBe(B.institution.slug);
     const [admin] = await getDb().select().from(schema.users).where(eq(schema.users.email, "admin@riverside.test"));
     await expectDenied(updateInstitutionDetails(admin, B.institution.id, { name: "Hijacked", shortName: "HJ" }));

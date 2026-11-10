@@ -29,6 +29,13 @@
       "when": 1794330486261,
       "tag": "0003_id_card_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794331736131,
+      "tag": "0004_college_state_pincode",
+      "breakpoints": true
     }
   ]
 }

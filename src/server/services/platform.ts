@@ -7,6 +7,7 @@ import { generateTempPassword } from "@/lib/crypto";
 import { badRequest, forbidden, notFound } from "@/lib/errors";
 import { DEFAULT_ACADEMIC, defaultPortalConfig, MODULE_KEYS } from "@/lib/portal-config";
 import { storage, storageBackend } from "@/lib/storage";
+import { PINCODE_RE, PLAN_KEYS, PLANS, type PlanKey } from "@/lib/plans";
 import { hashPassword } from "../auth";
 import { platformAudit } from "../audit";
 
@@ -26,24 +27,94 @@ export const institutionInput = z.object({
     .toLowerCase()
     .regex(/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/, "Slug must be 3–40 lowercase letters, digits or hyphens")
     .refine((s) => !RESERVED_SLUGS.has(s), "This slug is reserved"),
+  address: z.string().trim().max(300).optional().nullable(),
   city: z.string().trim().max(80).optional().nullable(),
+  state: z.string().trim().max(80).optional().nullable(),
+  pincode: z.string().trim().regex(PINCODE_RE, "PIN code must be 6 digits").optional().nullable(),
   contactEmail: z.email().optional().nullable(),
-  plan: z.enum(["starter", "standard", "enterprise"]),
+  contactPhone: z.string().trim().max(30).optional().nullable(),
+  principalName: z.string().trim().max(120).optional().nullable(),
+  plan: z.enum(PLAN_KEYS),
   licensedModules: z.array(z.enum(MODULE_KEYS as [string, ...string[]])).min(1, "License at least one module"),
   studentLimit: z.number().int().min(1).max(1_000_000),
-  adminName: z.string().trim().min(2).max(120),
-  adminEmail: z.email().transform((e) => e.toLowerCase()),
+  /** Without an admin email the college is created with no administrator; add one later from the college page. */
+  adminName: z.string().trim().min(2).max(120).nullish(),
+  adminEmail: z
+    .email()
+    .transform((e) => e.toLowerCase())
+    .nullish(),
   /** Optional: super admin chooses the first password. Blank = generate one. Always must-change at first sign-in. */
   adminPassword: z.string().optional().nullable(),
 });
 
-/** Onboard a college: tenant row, default portal config, first college admin. */
-export async function createInstitution(actor: Actor, input: z.input<typeof institutionInput>) {
+/** Every onboarding field is optional; blanks are filled in by `completeOnboarding`. */
+export type OnboardingInput = Partial<Omit<z.input<typeof institutionInput>, "plan" | "studentLimit" | "licensedModules">> & {
+  plan?: string | null;
+  studentLimit?: number | null;
+  licensedModules?: string[] | null;
+};
+
+const blank = (v: string | null | undefined): v is null | undefined | "" => !v || !v.trim();
+
+export function slugify(s: string) {
+  return s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 34)
+    .replace(/-+$/, "");
+}
+
+/** "Government Science College" → "GSC"; a single word is kept as is (max 40 chars). */
+export function shortNameFrom(name: string) {
+  const words = name.split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w) && !/^(of|and|the|&)$/i.test(w));
+  if (words.length >= 2) return words.map((w) => w[0].toUpperCase()).join("").slice(0, 12);
+  return name.trim().slice(0, 40);
+}
+
+/** First free slug based on `base` (base, base-2, base-3 …); a random one when nothing usable is given. */
+async function freeSlug(base: string) {
+  let root = slugify(base);
+  if (root.length < 3 || RESERVED_SLUGS.has(root)) root = `college-${root || crypto.randomUUID().slice(0, 6)}`.slice(0, 34).replace(/-+$/, "");
+  const rows = await getDb()
+    .select({ slug: institutions.slug })
+    .from(institutions)
+    .where(sql`${institutions.slug} = ${root} or ${institutions.slug} like ${`${root}-%`}`);
+  const taken = new Set(rows.map((r) => r.slug));
+  if (!taken.has(root)) return root;
+  for (let i = 2; ; i++) if (!taken.has(`${root}-${i}`)) return `${root}-${i}`;
+}
+
+/** Fill in defaults so the super admin can onboard with as little (or as much) as they know. */
+async function completeOnboarding(input: OnboardingInput): Promise<z.input<typeof institutionInput>> {
+  const plan = (PLAN_KEYS as readonly string[]).includes(input.plan ?? "") ? (input.plan as PlanKey) : "standard";
+  let name = !blank(input.name) ? input.name.trim() : !blank(input.shortName) ? input.shortName.trim() : "New College";
+  if (name.length < 3) name = `${name} College`;
+  let shortName = !blank(input.shortName) ? input.shortName.trim() : shortNameFrom(name);
+  if (shortName.length < 2) shortName = name.slice(0, 40);
+  const slug = !blank(input.slug) ? input.slug.trim() : await freeSlug(!blank(input.shortName) ? input.shortName : name);
+  const adminEmail = blank(input.adminEmail) ? null : input.adminEmail.trim();
+  return {
+    ...input,
+    name,
+    shortName,
+    slug,
+    plan,
+    studentLimit: input.studentLimit && input.studentLimit > 0 ? input.studentLimit : PLANS[plan].studentLimit,
+    licensedModules: input.licensedModules?.length ? input.licensedModules : PLANS[plan].modules,
+    adminEmail,
+    adminName: !blank(input.adminName) ? input.adminName.trim() : adminEmail ? adminEmail.split("@")[0].padEnd(2, "_") : null,
+  };
+}
+
+/** Onboard a college: tenant row, default portal config and, when an email is given, the first college admin. */
+export async function createInstitution(actor: Actor, input: OnboardingInput) {
   assertSuper(actor);
-  const data = institutionInput.parse(input);
+  const data = institutionInput.parse(await completeOnboarding(input));
   const db = getDb();
   const [clash] = await db.select({ id: institutions.id }).from(institutions).where(eq(institutions.slug, data.slug)).limit(1);
-  if (clash) throw badRequest("That slug is already taken.");
+  if (clash) throw badRequest("That slug is already taken. Leave it blank to get a free one automatically.");
 
   const tempPassword = chosenOrGenerated(data.adminPassword);
   const passwordHash = await hashPassword(tempPassword);
@@ -54,8 +125,13 @@ export async function createInstitution(actor: Actor, input: z.input<typeof inst
         name: data.name,
         shortName: data.shortName,
         slug: data.slug,
+        address: data.address ?? null,
         city: data.city ?? null,
+        state: data.state ?? null,
+        pincode: data.pincode ?? null,
         contactEmail: data.contactEmail ?? null,
+        contactPhone: data.contactPhone ?? null,
+        principalName: data.principalName ?? null,
         plan: data.plan,
         licensedModules: data.licensedModules,
         studentLimit: data.studentLimit,
@@ -64,15 +140,17 @@ export async function createInstitution(actor: Actor, input: z.input<typeof inst
     const cfg = defaultPortalConfig(data.licensedModules);
     await tx.insert(institutionSettings).values({ institutionId: inst.id, draftConfig: cfg, publishedConfig: cfg, academic: DEFAULT_ACADEMIC, publishedAt: new Date() });
 
-    let [admin] = await tx.select().from(users).where(eq(users.email, data.adminEmail)).limit(1);
     let issuedPassword: string | null = null;
-    if (!admin) {
-      [admin] = await tx.insert(users).values({ email: data.adminEmail, name: data.adminName, passwordHash, mustChangePassword: true }).returning();
-      issuedPassword = tempPassword;
+    if (data.adminEmail) {
+      let [admin] = await tx.select().from(users).where(eq(users.email, data.adminEmail)).limit(1);
+      if (!admin) {
+        [admin] = await tx.insert(users).values({ email: data.adminEmail, name: data.adminName ?? "College Administrator", passwordHash, mustChangePassword: true }).returning();
+        issuedPassword = tempPassword;
+      }
+      await tx.insert(memberships).values({ userId: admin.id, institutionId: inst.id, role: "college_admin" });
     }
-    await tx.insert(memberships).values({ userId: admin.id, institutionId: inst.id, role: "college_admin" });
     await platformAudit(actor, { institutionId: inst.id, action: "institution.create", entityType: "institution", entityId: inst.id, summary: `Onboarded ${inst.name} (${inst.slug})`, metadata: { plan: data.plan, modules: data.licensedModules } }, tx);
-    return { institution: inst, adminEmail: data.adminEmail, tempPassword: issuedPassword };
+    return { institution: inst, adminEmail: data.adminEmail ?? null, tempPassword: issuedPassword };
   });
 }
 
@@ -94,7 +172,8 @@ async function assertInstitution(id: string) {
 export async function addCollegeAdmin(actor: Actor, institutionId: string, input: { name: string; email: string; password?: string | null }) {
   assertSuper(actor);
   const inst = await assertInstitution(institutionId);
-  const d = z.object({ name: z.string().trim().min(2).max(120), email: z.email().transform((e) => e.toLowerCase()) }).parse(input);
+  const name = input.name?.trim() || input.email.split("@")[0].padEnd(2, "_");
+  const d = z.object({ name: z.string().trim().min(2).max(120), email: z.email().transform((e) => e.toLowerCase()) }).parse({ ...input, name });
   const password = chosenOrGenerated(input.password);
   const hash = await hashPassword(password);
   return getDb().transaction(async (tx) => {
@@ -160,9 +239,14 @@ export async function setInstitutionStatus(actor: Actor, institutionId: string, 
   return inst;
 }
 
-export async function updateSubscription(actor: Actor, institutionId: string, input: { plan: string; licensedModules: string[]; studentLimit: number }) {
+export async function updateSubscription(actor: Actor, institutionId: string, input: { plan?: string | null; licensedModules?: string[] | null; studentLimit?: number | null }) {
   assertSuper(actor);
-  const data = institutionInput.pick({ plan: true, licensedModules: true, studentLimit: true }).parse(input);
+  const plan = (PLAN_KEYS as readonly string[]).includes(input.plan ?? "") ? (input.plan as PlanKey) : "standard";
+  const data = institutionInput.pick({ plan: true, licensedModules: true, studentLimit: true }).parse({
+    plan,
+    licensedModules: input.licensedModules?.length ? input.licensedModules : PLANS[plan].modules,
+    studentLimit: input.studentLimit && input.studentLimit > 0 ? input.studentLimit : PLANS[plan].studentLimit,
+  });
   const db = getDb();
   const [inst] = await db.update(institutions).set(data).where(eq(institutions.id, institutionId)).returning();
   if (!inst) throw notFound("College");
@@ -255,12 +339,26 @@ export async function getInstitution(actor: Actor, id: string) {
   return { inst, admins, usage };
 }
 
-export async function updateInstitutionDetails(actor: Actor, institutionId: string, input: { name: string; shortName: string; city?: string | null; contactEmail?: string | null }) {
+const detailsInput = institutionInput.pick({ name: true, shortName: true, address: true, city: true, state: true, pincode: true, contactEmail: true, contactPhone: true, principalName: true });
+
+/** Blank name / short name keep the current values; every other blank clears that field. */
+export async function updateInstitutionDetails(actor: Actor, institutionId: string, input: Partial<z.input<typeof detailsInput>>) {
   assertSuper(actor);
-  const data = institutionInput.pick({ name: true, shortName: true, city: true, contactEmail: true }).parse(input);
+  const current = await assertInstitution(institutionId);
+  const data = detailsInput.parse({ ...input, name: blank(input.name) ? current.name : input.name, shortName: blank(input.shortName) ? current.shortName : input.shortName });
   const [inst] = await getDb()
     .update(institutions)
-    .set({ name: data.name, shortName: data.shortName, city: data.city ?? null, contactEmail: data.contactEmail ?? null })
+    .set({
+      name: data.name,
+      shortName: data.shortName,
+      address: data.address ?? null,
+      city: data.city ?? null,
+      state: data.state ?? null,
+      pincode: data.pincode ?? null,
+      contactEmail: data.contactEmail ?? null,
+      contactPhone: data.contactPhone ?? null,
+      principalName: data.principalName ?? null,
+    })
     .where(eq(institutions.id, institutionId))
     .returning();
   if (!inst) throw notFound("College");

@@ -1,6 +1,7 @@
-import { Badge, Card, Checkbox, Field, Flash, Input, KV, LinkButton, PageHeader, Select, Stat, StatusBadge } from "@/components/ui";
+import { Badge, Card, Field, Flash, Input, KV, LinkButton, PageHeader, Stat, StatusBadge } from "@/components/ui";
+import { CollegeAddressFields } from "@/components/college-fields";
+import { PlanPicker } from "@/components/plan-picker";
 import { CopyButton, SubmitButton } from "@/components/client";
-import { MODULES } from "@/lib/portal-config";
 import { formatDateTime } from "@/lib/format";
 import { flashOf, type Props } from "@/lib/page";
 import { orNotFound, requireSuperAdmin } from "@/server/session";
@@ -80,8 +81,8 @@ export default async function CollegeDetail({ params, searchParams }: Props<{ id
         <form action={addCollegeAdminAction} className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-4">
           <input type="hidden" name="_back" value={back} />
           <input type="hidden" name="id" value={inst.id} />
-          <Field label="Name">
-            <Input name="name" required />
+          <Field label="Name" hint="Optional">
+            <Input name="name" />
           </Field>
           <Field label="Login email">
             <Input name="email" type="email" required />
@@ -102,17 +103,12 @@ export default async function CollegeDetail({ params, searchParams }: Props<{ id
             <input type="hidden" name="id" value={inst.id} />
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="College name" className="sm:col-span-2">
-                <Input name="name" defaultValue={inst.name} required minLength={3} />
+                <Input name="name" defaultValue={inst.name} minLength={3} />
               </Field>
               <Field label="Short name">
-                <Input name="shortName" defaultValue={inst.shortName} required minLength={2} />
+                <Input name="shortName" defaultValue={inst.shortName} minLength={2} />
               </Field>
-              <Field label="City">
-                <Input name="city" defaultValue={inst.city ?? ""} />
-              </Field>
-              <Field label="Office email" className="sm:col-span-2">
-                <Input name="contactEmail" type="email" defaultValue={inst.contactEmail ?? ""} />
-              </Field>
+              <CollegeAddressFields v={inst} wide={false} />
             </div>
             <SubmitButton variant="secondary">Save details</SubmitButton>
           </form>
@@ -142,19 +138,7 @@ export default async function CollegeDetail({ params, searchParams }: Props<{ id
           <form action={updateSubscriptionAction} className="space-y-4">
             <input type="hidden" name="_back" value={back} />
             <input type="hidden" name="id" value={inst.id} />
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Field label="Plan">
-                <Select name="plan" defaultValue={inst.plan} options={["starter", "standard", "enterprise"].map((p) => ({ value: p, label: p }))} />
-              </Field>
-              <Field label="Student limit">
-                <Input name="studentLimit" type="number" min={1} defaultValue={inst.studentLimit} required />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-              {MODULES.map((m) => (
-                <Checkbox key={m.key} name="modules" value={m.key} defaultChecked={inst.licensedModules.includes(m.key)} label={m.label} />
-              ))}
-            </div>
+            <PlanPicker plan={inst.plan} studentLimit={inst.studentLimit} modules={inst.licensedModules} />
             <p className="text-xs text-muted">Removing a module from the subscription disables it in the college&apos;s portal immediately, regardless of the college&apos;s own settings.</p>
             <SubmitButton>Save subscription</SubmitButton>
           </form>
