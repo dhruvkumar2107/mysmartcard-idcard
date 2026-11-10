@@ -243,7 +243,18 @@ describe("attendance corrections", () => {
 });
 
 describe("NFC card lifecycle", () => {
+  it("public tap shows every ID-card field by default", async () => {
+    const [c] = (await cards.listCards(A, { status: "active" })).filter((x) => x.card.studentId);
+    const view = await cards.resolveCardToken((await cards.liveTokenForCard(A, c.card.id))!.token, { countTap: false });
+    expect(view.state).toBe("ok");
+    if (view.state !== "ok") return;
+    const keys = Object.keys(view.fields);
+    for (const k of ["fullName", "registerNo", "rollNo", "programme", "section", "academicYear", "dateOfBirth", "phone", "email", "cardValidity", "guardianPhone", "address", "guardianName", "classTeacher", "semester", "bloodGroup", "department", "internship"]) expect(keys).toContain(k);
+  });
+
   it("public tap shows only configured public fields, never private data", async () => {
+    await settings.savePublicFields(A, ["photo", "fullName", "enrollmentNo", "department", "programme", "status", "cardValidity"]);
+    A = await ctxFor("admin@northbridge.test", "northbridge");
     const [c] = (await cards.listCards(A, { status: "active" })).filter((x) => x.card.studentId);
     const live = (await cards.liveTokenForCard(A, c.card.id))!;
     expect(live.token.length).toBeGreaterThanOrEqual(43);
@@ -472,6 +483,50 @@ describe("fees, library, timetable, import", () => {
     expect((await students.listStudents(B, {})).total).toBe(before + 1);
     const audit = await getDb().select().from(schema.auditLogs).where(and(eq(schema.auditLogs.institutionId, B.institution.id), eq(schema.auditLogs.action, "student.import")));
     expect(audit).toHaveLength(1);
+    // Imported students get their NFC card link straight away.
+    const [imp] = (await students.listStudents(B, { q: "RCASIMP001" })).rows;
+    const nfc = await cards.liveCardForStudent(B, imp.student.id);
+    expect(nfc?.card).toMatchObject({ digital: true, status: "active", serial: "ID-RCASIMP001", validUntil: "2027-06-30" });
+    expect(nfc?.url).toMatch(/\/card\/[A-Za-z0-9_-]{43}$/);
+  });
+});
+
+describe("automatic NFC card links", () => {
+  it("issues a card link when a student is created, and a physical card takes over the same URL", async () => {
+    const [dept] = await getDb().select().from(schema.departments).where(eq(schema.departments.institutionId, A.institution.id)).limit(1);
+    const s = await students.createStudent(A, { enrollmentNo: "nb/auto-1", fullName: "Auto Card", email: null, phone: null, dateOfBirth: null, gender: null, guardianName: null, guardianPhone: null, address: null, bloodGroup: null, departmentId: dept.id, programmeId: null, sectionId: null, semester: 1, academicYear: "2026-27", admissionYear: null, status: "active" });
+    expect(s.cardUrl).toMatch(/\/card\/[A-Za-z0-9_-]{43}$/);
+    const token = s.cardUrl!.split("/card/")[1];
+    const view = await cards.resolveCardToken(token, { countTap: false });
+    expect(view.state === "ok" && view.studentId).toBe(s.id);
+    const digital = (await cards.liveCardForStudent(A, s.id))!;
+    expect(digital.card.serial).toBe("ID-NB-AUTO-1");
+
+    // Assigning a physical card retires the digital one but keeps the student's URL working.
+    await cards.registerCards(A, ["PHYS-AUTO-1"]);
+    const phys = (await cards.unassignedCards(A)).find((c) => c.serial === "PHYS-AUTO-1")!;
+    const res = await cards.assignCard(A, phys.id, s.id, null);
+    expect(res.url).toBe(s.cardUrl);
+    const after = (await cards.liveCardForStudent(A, s.id))!;
+    expect(after.card).toMatchObject({ id: phys.id, digital: false, validUntil: "2027-06-30" });
+    expect((await cards.resolveCardToken(token, { countTap: false })).state).toBe("ok");
+    // A second physical card is still refused: use Replace.
+    await cards.registerCards(A, ["PHYS-AUTO-2"]);
+    const phys2 = (await cards.unassignedCards(A)).find((c) => c.serial === "PHYS-AUTO-2")!;
+    await expectDenied(cards.assignCard(A, phys2.id, s.id, null));
+  });
+
+  it("backfills links only for students without a live card", async () => {
+    const first = await cards.issueMissingCards(A);
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(await cards.issueMissingCards(A)).toBe(0);
+  });
+
+  it("defaults card validity to the end of the academic year", () => {
+    const today = new Date("2026-11-10T00:00:00Z");
+    expect(cards.defaultCardValidity("2026-27", today)).toBe("2027-06-30");
+    expect(cards.defaultCardValidity("2024-25", today)).toBe("2027-11-10"); // already over → one year from today
+    expect(cards.defaultCardValidity(null, today)).toBe("2027-11-10");
   });
 });
 

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Eye, Pencil } from "lucide-react";
 import { Alert, Card, EmptyState, Field, Flash, Input, KV, LinkButton, PageHeader, StatusBadge, Table, Tabs, Td, TenantFields, Th } from "@/components/ui";
-import { SubmitButton } from "@/components/client";
+import { CopyButton, SubmitButton } from "@/components/client";
 import { OneTimeCredential } from "@/components/server-bits";
 import { AttendanceView, CourseworkView, DigitalIdCard, FeesView, idCardCollege, idCardDetails, InternalMarksView, LibraryView, NoticesView, ResultsView, TimetableView, TransportView } from "@/components/views";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -17,8 +17,8 @@ import { courseworkForStudent } from "@/server/services/coursework";
 import { studentLedger } from "@/server/services/finance";
 import { loansForStudent, renewalEligibility } from "@/server/services/library";
 import { transportForStudent } from "@/server/services/transport";
-import { cardsForStudent } from "@/server/services/cards";
-import { disablePortalAction, enablePortalAction, uploadDocumentAction, uploadPhotoAction } from "@/server/actions/admin";
+import { cardsForStudent, liveCardForStudent } from "@/server/services/cards";
+import { disablePortalAction, enablePortalAction, issueCardLinksAction, uploadDocumentAction, uploadPhotoAction } from "@/server/actions/admin";
 
 export const metadata = { title: "Student profile" };
 
@@ -52,6 +52,7 @@ export default async function StudentProfile({ params, searchParams }: SlugProps
   const tabs = TABS.filter((t) => (t.key === "fees" ? can("fees.view") : t.key === "history" ? can("audit.view") : t.key === "card" ? can("cards.manage") : true));
   const portal = await portalAccessStatus(ctx, s);
   const photoUrl = s.photoFileId ? fileHref(s.photoFileId) : null;
+  const nfc = tab === "personal" && can("cards.manage") ? await liveCardForStudent(ctx, id) : null;
 
   return (
     <>
@@ -92,7 +93,36 @@ export default async function StudentProfile({ params, searchParams }: SlugProps
               photoUrl={photoUrl}
               brand={ctx.portalConfig.branding.primaryColor}
               details={idCardDetails(s, section?.name)}
+              card={nfc ? { status: nfc.card.status, validUntil: nfc.card.validUntil } : null}
             />
+            {can("cards.manage") && (
+              <Card title="NFC card link" description="Write this URL onto the student's NFC tag (or print the QR). Tapping it opens the ID card above.">
+                {nfc?.url ? (
+                  <div className="space-y-3">
+                    <code className="block break-all rounded-lg bg-surface-2 px-3 py-2 text-xs">{nfc.url}</code>
+                    <div className="flex flex-wrap gap-2">
+                      <CopyButton text={nfc.url} label="Copy link" />
+                      <LinkButton href={nfc.url} target="_blank" rel="noopener">
+                        Open
+                      </LinkButton>
+                      <LinkButton href={`/c/${slug}/admin/cards/${nfc.card.id}`}>Manage card</LinkButton>
+                    </div>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/c/${slug}/cards/${nfc.card.id}/qr`} alt="QR code for the NFC card link" className="mx-auto w-40" />
+                    <p className="text-xs text-muted">
+                      Card {nfc.card.serial} · valid until {nfc.card.validUntil ? formatDate(nfc.card.validUntil) : "—"} · tapped {nfc.tapCount} time{nfc.tapCount === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                ) : (
+                  <form action={issueCardLinksAction} className="space-y-2">
+                    <TenantFields slug={slug} back={back} />
+                    <input type="hidden" name="studentId" value={id} />
+                    <p className="text-sm text-muted">This student has no card link yet.</p>
+                    <SubmitButton>Generate card link</SubmitButton>
+                  </form>
+                )}
+              </Card>
+            )}
             {can("students.edit") && (
               <Card title="Update photograph">
                 <form action={uploadPhotoAction} encType="multipart/form-data" className="flex flex-col gap-3">

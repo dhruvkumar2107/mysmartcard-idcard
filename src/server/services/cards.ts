@@ -70,7 +70,11 @@ async function activeCardFor(studentId: string, tx: Executor, excludeCardId?: st
   return c;
 }
 
-/** Assign an unassigned card to a student and issue its URL token. */
+/**
+ * Assign an unassigned card to a student and issue its URL token. If the student only has the
+ * digital card issued with their record, the physical card takes over that card's URL, so a link
+ * already written to a tag or shared keeps working.
+ */
 export async function assignCard(ctx: TenantContext, cardId: string, studentId: string, validUntil: string | null) {
   assertAdminWrite(ctx, "cards.manage");
   const card = await owned(ctx, nfcCards, cardId, "Card");
@@ -80,13 +84,115 @@ export async function assignCard(ctx: TenantContext, cardId: string, studentId: 
   const db = getDb();
   return db.transaction(async (tx) => {
     const existing = await activeCardFor(s.id, tx);
-    if (existing) throw badRequest(`${s.enrollmentNo} already has card ${existing.serial}. Use Replace instead.`);
-    await tx.update(nfcCards).set({ studentId: s.id, status: "active", assignedAt: new Date(), validUntil }).where(eq(nfcCards.id, card.id));
-    const token = await issueToken(ctx, card.id, tx);
-    await event(ctx, tx, card.id, s.id, "assigned");
+    if (existing && !existing.digital) throw badRequest(`${s.enrollmentNo} already has card ${existing.serial}. Use Replace instead.`);
+    let token: string;
+    if (existing) {
+      await tx.update(nfcCards).set({ studentId: s.id, status: existing.status, assignedAt: new Date(), validUntil: validUntil ?? existing.validUntil }).where(eq(nfcCards.id, card.id));
+      await tx.update(cardTokens).set({ cardId: card.id }).where(and(eq(cardTokens.cardId, existing.id), eq(cardTokens.institutionId, ctx.institution.id), eq(cardTokens.status, "active")));
+      await tx.update(nfcCards).set({ status: "revoked" }).where(eq(nfcCards.id, existing.id));
+      await event(ctx, tx, existing.id, s.id, "revoked", `Superseded by physical card ${card.serial} (same URL)`);
+      const live = await liveTokenIn(ctx, card.id, tx);
+      token = live ?? (await issueToken(ctx, card.id, tx));
+    } else {
+      await tx.update(nfcCards).set({ studentId: s.id, status: "active", assignedAt: new Date(), validUntil }).where(eq(nfcCards.id, card.id));
+      token = await issueToken(ctx, card.id, tx);
+    }
+    await event(ctx, tx, card.id, s.id, "assigned", existing ? `Took over the URL of ${existing.serial}` : undefined);
     await audit(ctx, { action: "card.assign", entityType: "nfc_card", entityId: card.id, summary: `Assigned card ${card.serial} to ${s.enrollmentNo}` }, tx);
     return { token, url: cardUrl(token) };
   });
+}
+
+async function liveTokenIn(ctx: TenantContext, cardId: string, tx: Executor) {
+  const [t] = await tx
+    .select({ enc: cardTokens.tokenEncrypted })
+    .from(cardTokens)
+    .where(and(eq(cardTokens.cardId, cardId), eq(cardTokens.institutionId, ctx.institution.id), eq(cardTokens.status, "active")))
+    .orderBy(desc(cardTokens.createdAt))
+    .limit(1);
+  return t ? decrypt(t.enc) : null;
+}
+
+/** "2026-27" → 2027-06-30 (end of that academic year); otherwise, or if already past, one year from today. */
+export function defaultCardValidity(academicYear: string | null | undefined, today = new Date()) {
+  const todayIso = today.toISOString().slice(0, 10);
+  const m = academicYear?.match(/^(\d{4})\s*[-/–]\s*(\d{2}|\d{4})$/);
+  if (m) {
+    const end = m[2].length === 2 ? Number(m[1].slice(0, 2) + m[2]) + (m[2] < m[1].slice(2) ? 100 : 0) : Number(m[2]);
+    const iso = `${end}-06-30`;
+    if (iso >= todayIso) return iso;
+  }
+  const d = new Date(today);
+  d.setFullYear(d.getFullYear() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+const serialBase = (enrollmentNo: string) => `ID-${enrollmentNo.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`.slice(0, 34).replace(/-+$/, "");
+
+/**
+ * Give each student without a live card a digital card and its NFC URL, so the link exists the
+ * moment the student is created. Students who already have a live card are skipped.
+ * Runs inside the caller's transaction; returns studentId → URL for the cards it created.
+ */
+export async function issueStudentCards(ctx: TenantContext, list: { id: string; enrollmentNo: string; academicYear: string | null }[], tx: Executor) {
+  const urls = new Map<string, string>();
+  if (!list.length) return urls;
+  const ids = list.map((s) => s.id);
+  const live = await tx
+    .select({ studentId: nfcCards.studentId })
+    .from(nfcCards)
+    .where(and(eq(nfcCards.institutionId, ctx.institution.id), inArray(nfcCards.studentId, ids), inArray(nfcCards.status, ["active", "inactive"])));
+  const has = new Set(live.map((r) => r.studentId));
+  const todo = list.filter((s) => !has.has(s.id));
+  if (!todo.length) return urls;
+
+  const taken = new Set(
+    (await tx.select({ serial: nfcCards.serial }).from(nfcCards).where(and(eq(nfcCards.institutionId, ctx.institution.id), ilike(nfcCards.serial, "ID-%")))).map((r) => r.serial),
+  );
+  const now = new Date();
+  const rows = todo.map((s) => {
+    const base = serialBase(s.enrollmentNo) || "ID-CARD";
+    let serial = base;
+    for (let i = 2; taken.has(serial); i++) serial = `${base}-${i}`;
+    taken.add(serial);
+    return { institutionId: ctx.institution.id, serial, status: "active", studentId: s.id, digital: true, assignedAt: now, validUntil: defaultCardValidity(s.academicYear, now) };
+  });
+
+  for (let i = 0; i < rows.length; i += 500) {
+    const cards = await tx.insert(nfcCards).values(rows.slice(i, i + 500)).returning({ id: nfcCards.id, studentId: nfcCards.studentId });
+    const tokens = cards.map((c) => ({ card: c, token: generateToken(32) }));
+    await tx.insert(cardTokens).values(tokens.map((t) => ({ institutionId: ctx.institution.id, cardId: t.card.id, tokenHash: sha256(t.token), tokenEncrypted: encrypt(t.token) })));
+    await tx.insert(cardEvents).values(cards.map((c) => ({ institutionId: ctx.institution.id, cardId: c.id, studentId: c.studentId, action: "issued", notes: "Digital card issued with the student record", actorUserId: ctx.user.id })));
+    for (const t of tokens) urls.set(t.card.studentId!, cardUrl(t.token));
+  }
+  return urls;
+}
+
+/** Issue card links for every active student who does not have a live card yet (e.g. records created before auto-issue). */
+export async function issueMissingCards(ctx: TenantContext, studentId?: string) {
+  assertAdminWrite(ctx, "cards.manage");
+  const conds = [eq(students.institutionId, ctx.institution.id), ne(students.status, "archived")];
+  if (studentId) conds.push(eq(students.id, studentId));
+  const list = await getDb().select({ id: students.id, enrollmentNo: students.enrollmentNo, academicYear: students.academicYear }).from(students).where(and(...conds));
+  return getDb().transaction(async (tx) => {
+    const urls = await issueStudentCards(ctx, list, tx);
+    if (urls.size) await audit(ctx, { action: "card.issue", entityType: "nfc_card", summary: `Issued ${urls.size} digital card link(s)` }, tx);
+    return urls.size;
+  });
+}
+
+/** The student's live card (active or inactive) and its URL, if any. */
+export async function liveCardForStudent(ctx: TenantContext, studentId: string) {
+  assertCan(ctx, "cards.manage");
+  const [c] = await getDb()
+    .select()
+    .from(nfcCards)
+    .where(and(eq(nfcCards.institutionId, ctx.institution.id), eq(nfcCards.studentId, studentId), inArray(nfcCards.status, ["active", "inactive"])))
+    .orderBy(desc(nfcCards.assignedAt))
+    .limit(1);
+  if (!c) return null;
+  const live = await liveTokenForCard(ctx, c.id);
+  return { card: c, url: live?.url ?? null, tapCount: live?.tapCount ?? 0 };
 }
 
 export async function setCardActive(ctx: TenantContext, cardId: string, active: boolean) {

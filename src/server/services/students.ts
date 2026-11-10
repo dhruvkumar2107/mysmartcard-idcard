@@ -10,6 +10,7 @@ import { hashPassword } from "../auth";
 import { audit } from "../audit";
 import { assertAdminWrite, assertCan, studentScope, type TenantContext } from "../context";
 import { isUuid, owned, ownedOrNull } from "./guard";
+import { issueStudentCards } from "./cards";
 
 export const STUDENT_STATUSES = ["active", "inactive", "suspended", "graduated", "archived"] as const;
 export const SENSITIVE_FIELDS = ["dateOfBirth", "address", "guardianName", "guardianPhone"] as const;
@@ -139,12 +140,16 @@ export async function createStudent(ctx: TenantContext, input: StudentInput) {
   const d = studentInput.parse(input);
   await validateRefs(ctx, d);
   await assertCapacity(ctx, 1);
-  const [row] = await getDb()
-    .insert(students)
-    .values({ ...d, enrollmentNo: d.enrollmentNo.toUpperCase(), institutionId: ctx.institution.id })
-    .returning();
-  await audit(ctx, { action: "student.create", entityType: "student", entityId: row.id, summary: `Created student ${row.enrollmentNo} – ${row.fullName}` });
-  return row;
+  return getDb().transaction(async (tx) => {
+    const [row] = await tx
+      .insert(students)
+      .values({ ...d, enrollmentNo: d.enrollmentNo.toUpperCase(), institutionId: ctx.institution.id })
+      .returning();
+    // Every new student gets their NFC card link straight away.
+    const urls = await issueStudentCards(ctx, [row], tx);
+    await audit(ctx, { action: "student.create", entityType: "student", entityId: row.id, summary: `Created student ${row.enrollmentNo} – ${row.fullName}${urls.size ? " (NFC card link issued)" : ""}` }, tx);
+    return { ...row, cardUrl: urls.get(row.id) ?? null };
+  });
 }
 
 export async function updateStudent(ctx: TenantContext, id: string, input: StudentInput) {
@@ -258,8 +263,9 @@ export async function commitImport(ctx: TenantContext, raw: Record<string, strin
         })),
       )
       .onConflictDoNothing()
-      .returning({ id: students.id });
-    await audit(ctx, { action: "student.import", entityType: "student", summary: `Imported ${inserted.length} of ${totalRows} rows from ${fileName}`, metadata: { skipped: issues.length } }, tx);
+      .returning({ id: students.id, enrollmentNo: students.enrollmentNo, academicYear: students.academicYear });
+    const cardLinks = await issueStudentCards(ctx, inserted, tx);
+    await audit(ctx, { action: "student.import", entityType: "student", summary: `Imported ${inserted.length} of ${totalRows} rows from ${fileName}; issued ${cardLinks.size} NFC card link(s)`, metadata: { skipped: issues.length } }, tx);
     return inserted.length;
   });
   return { imported, issues, totalRows };

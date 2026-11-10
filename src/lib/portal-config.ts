@@ -78,7 +78,8 @@ export function defaultPortalConfig(licensed: string[] = MODULE_KEYS): PortalCon
     modules: Object.fromEntries(
       MODULE_KEYS.map((key, i) => [key, { enabled: licensed.includes(key), order: i, departmentIds: [], programmeIds: [] }]),
     ),
-    publicFields: ["photo", "fullName", "enrollmentNo", "department", "programme", "status", "cardValidity"],
+    // Every ID-card field is shown on the NFC tap page by default; the college can hide any of them in Configuration.
+    publicFields: PUBLIC_FIELDS.map((f) => f.key),
     features: allFlags(false),
   };
 }

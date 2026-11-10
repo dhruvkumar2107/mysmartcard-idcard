@@ -1,0 +1,1 @@
+ALTER TABLE "nfc_cards" ADD COLUMN "digital" boolean DEFAULT false NOT NULL;

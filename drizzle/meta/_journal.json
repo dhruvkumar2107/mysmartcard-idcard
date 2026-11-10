@@ -36,6 +36,20 @@
       "when": 1794331736131,
       "tag": "0004_college_state_pincode",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794333617582,
+      "tag": "0005_digital_student_cards",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794333619142,
+      "tag": "0006_nfc_show_all_fields",
+      "breakpoints": true
     }
   ]
 }

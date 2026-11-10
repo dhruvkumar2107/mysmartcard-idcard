@@ -110,7 +110,7 @@ export async function createStudentAction(fd: FormData) {
     const s = await students.createStudent(ctx, studentFromForm(fd));
     const photo = fd.get("photo");
     if (photo instanceof File && photo.size > 0) await students.uploadStudentPhoto(ctx, s.id, photo);
-    return { message: `Student ${s.enrollmentNo} created.`, to: `/c/${ctx.institution.slug}/admin/students/${s.id}` };
+    return { message: `Student ${s.enrollmentNo} created.${s.cardUrl ? " NFC card link generated — copy it from the NFC card link panel." : ""}`, to: `/c/${ctx.institution.slug}/admin/students/${s.id}` };
   });
 }
 export async function updateStudentAction(fd: FormData) {
@@ -181,7 +181,7 @@ export async function importStudentsAction(fd: FormData) {
       .join("\n");
     const head = dryRun
       ? `Validation: ${res.resolved.length} of ${res.totalRows} rows are ready to import, ${res.issues.length} have problems.`
-      : `Imported ${res.imported} of ${res.totalRows} rows. ${res.issues.length} row(s) skipped.`;
+      : `Imported ${res.imported} of ${res.totalRows} rows, each with its NFC card link. ${res.issues.length} row(s) skipped.`;
     return `${head}${issueText ? `\n${issueText}${res.issues.length > 15 ? `\n…and ${res.issues.length - 15} more` : ""}` : ""}`;
   });
 }
@@ -555,6 +555,12 @@ export async function registerCardsAction(fd: FormData) {
   return tenantAction(fd, async (ctx) => {
     const r = await cards.registerCards(ctx, str(fd, "serials").split(/[\s,;]+/));
     return `Registered ${r.created} card(s)${r.skipped ? `; ${r.skipped} already existed` : ""}.`;
+  });
+}
+export async function issueCardLinksAction(fd: FormData) {
+  return tenantAction(fd, async (ctx) => {
+    const n = await cards.issueMissingCards(ctx, optStr(fd, "studentId") ?? undefined);
+    return n ? `Generated ${n} NFC card link${n === 1 ? "" : "s"}.` : "Every active student already has a card link.";
   });
 }
 export async function assignCardAction(fd: FormData) {

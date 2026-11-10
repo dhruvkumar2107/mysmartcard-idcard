@@ -785,6 +785,8 @@ export const nfcCards = pgTable(
     status: text("status").notNull().default("unassigned"), // unassigned | active | inactive | lost | damaged | revoked
     studentId: uuid("student_id").references(() => students.id, { onDelete: "set null" }),
     validUntil: date("valid_until"),
+    /** Issued automatically with the student record (no physical card registered yet). Its URL can be written to any NFC tag. */
+    digital: boolean("digital").notNull().default(false),
     assignedAt: timestamp("assigned_at", { withTimezone: true }),
     createdAt: createdAt(),
   },

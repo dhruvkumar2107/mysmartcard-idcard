@@ -6,7 +6,7 @@ import { flashOf, one, qs, type SlugProps } from "@/lib/page";
 import { requireTenant } from "@/server/session";
 import { cardCounts, listCards, unassignedCards } from "@/server/services/cards";
 import { listStudents } from "@/server/services/students";
-import { assignCardAction, registerCardsAction } from "@/server/actions/admin";
+import { assignCardAction, issueCardLinksAction, registerCardsAction } from "@/server/actions/admin";
 
 export const metadata = { title: "Digital ID & NFC cards" };
 
@@ -29,7 +29,16 @@ export default async function CardsPage({ params, searchParams }: SlugProps) {
 
   return (
     <>
-      <PageHeader title="Digital ID & NFC cards" description="Register physical cards, link them to students, and control the URL each card opens." />
+      <PageHeader
+        title="Digital ID & NFC cards"
+        description="Every new student gets a card link automatically. Register physical cards to link them to students, and control the URL each card opens."
+        actions={
+          <form action={issueCardLinksAction}>
+            <TenantFields slug={slug} back={here} />
+            <SubmitButton variant="secondary">Generate links for students without one</SubmitButton>
+          </form>
+        }
+      />
       <Flash searchParams={flashOf(sp)} />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Active" value={counts.active} tone="ok" href={qs(base, { status: "active" })} />
