@@ -1,6 +1,8 @@
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLogs, institutionSettings, portalConfigHistory, supportGrants, users } from "@/db/schema";
+import { z } from "zod";
+import { auditLogs, files, institutions, institutionSettings, portalConfigHistory, supportGrants, users } from "@/db/schema";
+import { newStorageKey, storage, validateUpload } from "@/lib/storage";
 import { badRequest } from "@/lib/errors";
 import { PERMISSIONS, ROLES, DEFAULT_ROLE_PERMISSIONS, type Role } from "@/lib/permissions";
 import { academicSettingsSchema, normalizeConfig, PUBLIC_FIELDS, type AcademicSettings } from "@/lib/portal-config";
@@ -28,6 +30,34 @@ export async function savePublicFields(ctx: TenantContext, fields: string[]) {
     await tx.update(institutionSettings).set({ draftConfig: draft, publishedConfig: published, updatedAt: new Date() }).where(eq(institutionSettings.institutionId, ctx.institution.id));
     await tx.insert(portalConfigHistory).values({ institutionId: ctx.institution.id, action: "public_fields", config: published, actorUserId: ctx.user.id });
     await audit(ctx, { action: "portal.public_fields", entityType: "portal_config", summary: `Updated NFC tap-page fields (${publicFields.length} shown)`, metadata: { publicFields } }, tx);
+  });
+}
+
+const idCardDetailsInput = z.object({
+  address: z.string().trim().max(300).nullable(),
+  contactPhone: z.string().trim().max(30).nullable(),
+  principalName: z.string().trim().max(120).nullable(),
+});
+
+/** College details printed on every student ID card. The signature image is public (owner type "branding"). */
+export async function saveIdCardDetails(ctx: TenantContext, input: z.input<typeof idCardDetailsInput>, signature?: File | null, removeSignature = false) {
+  assertAdminWrite(ctx, "portal.configure");
+  const d = idCardDetailsInput.parse(input);
+  const patch: Partial<typeof institutions.$inferInsert> = { ...d };
+  const db = getDb();
+  await db.transaction(async (tx) => {
+    if (signature && signature.size > 0) {
+      const up = await validateUpload(signature, "image");
+      const key = newStorageKey(ctx.institution.id, "branding");
+      await storage().put(key, up.buffer);
+      const [f] = await tx
+        .insert(files)
+        .values({ institutionId: ctx.institution.id, ownerType: "branding", ownerId: ctx.institution.id, storageKey: key, originalName: up.name, mimeType: up.mimeType, sizeBytes: up.buffer.length, label: "Principal signature", uploadedByUserId: ctx.user.id })
+        .returning();
+      patch.principalSignatureFileId = f.id;
+    } else if (removeSignature) patch.principalSignatureFileId = null;
+    await tx.update(institutions).set(patch).where(eq(institutions.id, ctx.institution.id));
+    await audit(ctx, { action: "settings.id_card", entityType: "institution", entityId: ctx.institution.id, summary: `Updated ID card details${patch.principalSignatureFileId ? " and principal signature" : patch.principalSignatureFileId === null ? " (signature removed)" : ""}` }, tx);
   });
 }
 

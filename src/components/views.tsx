@@ -23,6 +23,59 @@ const catLabel = (k: string) => ASSESSMENT_CATEGORIES.find((c) => c.key === k)?.
 
 // ---------------------------------------------------------------- Digital ID
 
+/** College-level details printed on every ID card (address, contact, principal signature). */
+export type IdCardCollege = {
+  name: string;
+  logoUrl?: string | null;
+  address?: string | null;
+  contactPhone?: string | null;
+  principalName?: string | null;
+  signatureUrl?: string | null;
+};
+
+export function idCardCollege(inst: { name: string; address?: string | null; contactPhone?: string | null; principalName?: string | null; principalSignatureFileId?: string | null }, logoFileId: string | null | undefined): IdCardCollege {
+  return {
+    name: inst.name,
+    logoUrl: logoFileId ? `/api/files/${logoFileId}` : null,
+    address: inst.address,
+    contactPhone: inst.contactPhone,
+    principalName: inst.principalName,
+    signatureUrl: inst.principalSignatureFileId ? `/api/files/${inst.principalSignatureFileId}` : null,
+  };
+}
+
+/** Standard ID-card rows for a viewer allowed to see the whole record (the student, or staff). Empty values are skipped. */
+export function idCardDetails(
+  s: {
+    registerNo?: string | null;
+    rollNo?: string | null;
+    classTeacher?: string | null;
+    internship?: string | null;
+    dateOfBirth?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    guardianName?: string | null;
+    guardianPhone?: string | null;
+    address?: string | null;
+  },
+  section?: string | null,
+): [string, string][] {
+  const rows: [string, string | null | undefined][] = [
+    ["Register number", s.registerNo],
+    ["Roll number", s.rollNo],
+    ["Section / division", section],
+    ["Class teacher", s.classTeacher],
+    ["Date of birth", s.dateOfBirth ? formatDate(s.dateOfBirth) : null],
+    ["Contact number", s.phone],
+    ["Email", s.email],
+    ["Parent / guardian", s.guardianName],
+    ["Parent / guardian contact", s.guardianPhone],
+    ["Address", s.address],
+    ["Internship / placement", s.internship],
+  ];
+  return rows.filter((r): r is [string, string] => !!r[1]);
+}
+
 export function DigitalIdCard({
   college,
   student,
@@ -31,7 +84,7 @@ export function DigitalIdCard({
   brand,
   details,
 }: {
-  college: { name: string; logoUrl?: string | null };
+  college: IdCardCollege;
   student: { fullName: string; enrollmentNo: string; department?: string | null; programme?: string | null; semester?: number | string | null; academicYear?: string | null; status: string; bloodGroup?: string | null };
   photoUrl: string | null;
   card?: { status: string; validUntil: string | null } | null;
@@ -48,6 +101,8 @@ export function DigitalIdCard({
         ) : null}
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{college.name}</div>
+          {college.address && <div className="truncate text-[11px] text-white/80">{college.address}</div>}
+          {college.contactPhone && <div className="text-[11px] text-white/80">Ph: {college.contactPhone}</div>}
           <div className="text-[11px] uppercase tracking-wider text-white/70">Student identity card</div>
         </div>
       </div>
@@ -83,12 +138,23 @@ export function DigitalIdCard({
           ))}
         </dl>
       )}
+      {(college.signatureUrl || college.principalName) && (
+        <div className="flex justify-end border-t border-line px-5 py-3">
+          <div className="text-center">
+            {college.signatureUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={college.signatureUrl} alt={`Signature of ${college.principalName ?? "the principal"}`} className="mx-auto h-10 max-w-[10rem] object-contain" />
+            )}
+            <div className="mt-0.5 border-t border-line pt-0.5 text-[11px] text-muted">{college.principalName ? `${college.principalName}, Principal` : "Principal"}</div>
+          </div>
+        </div>
+      )}
       {card && (
         <div className="flex items-center justify-between border-t border-line bg-surface-2/50 px-5 py-2.5 text-xs">
           <span>
             NFC card <StatusBadge status={card.status} />
           </span>
-          <span className="text-muted">Valid until {formatDate(card.validUntil)}</span>
+          <span className="text-muted">Valid until {card.validUntil ? formatDate(card.validUntil) : "—"}</span>
         </div>
       )}
     </div>

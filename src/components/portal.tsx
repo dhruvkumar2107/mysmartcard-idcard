@@ -5,7 +5,7 @@ import { MODULES, feature, type ModuleKey } from "@/lib/portal-config";
 import { formatDate, formatMoney, initials } from "@/lib/format";
 import { loadModule, portalHome, visibleModules, portalStudent, type PortalViewer } from "@/server/services/portal";
 import { noticeForViewer } from "@/server/services/notices";
-import { AttendanceView, CourseworkView, DigitalIdCard, FeesView, InternalMarksView, LibraryView, NoticeCard, NoticeDetail, NoticesView, ResultsView, TimetableView, TransportView } from "./views";
+import { AttendanceView, CourseworkView, DigitalIdCard, FeesView, idCardCollege, idCardDetails, InternalMarksView, LibraryView, NoticeCard, NoticeDetail, NoticesView, ResultsView, TimetableView, TransportView } from "./views";
 import { Badge, EmptyState, Input, LinkButton, Meter, cn } from "./ui";
 import { SubmitButton } from "./client";
 import { MarkNoticeRead, NotificationBell } from "./notifications";
@@ -158,7 +158,7 @@ export async function PortalHome({ v, base }: { v: PortalViewer; base: string })
             <h2 id="id-h" className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
               Digital student ID
             </h2>
-            <DigitalIdCard college={{ name: v.ctx.institution.name, logoUrl: v.config.branding.logoFileId ? fileHref(v.config.branding.logoFileId) : null }} student={{ ...s, department: h.me.department?.name, programme: h.me.programme?.name }} photoUrl={s.photoFileId ? fileHref(s.photoFileId) : null} brand={v.config.branding.primaryColor} />
+            <DigitalIdCard college={idCardCollege(v.ctx.institution, v.config.branding.logoFileId)} student={{ ...s, department: h.me.department?.name, programme: h.me.programme?.name }} photoUrl={s.photoFileId ? fileHref(s.photoFileId) : null} brand={v.config.branding.primaryColor} />
           </section>
         )}
         <section aria-labelledby="sections-h" className="min-w-0">
@@ -263,8 +263,9 @@ export async function PortalModule({ v, k, q, page, base, submitAction }: { v: P
       const live = data.cards.find((c) => c.status === "active" || c.status === "inactive");
       body = (
         <DigitalIdCard
-          college={{ name: v.ctx.institution.name, logoUrl: v.config.branding.logoFileId ? fileHref(v.config.branding.logoFileId) : null }}
+          college={idCardCollege(v.ctx.institution, v.config.branding.logoFileId)}
           student={{ ...s, department: data.me.department?.name, programme: data.me.programme?.name }}
+          details={idCardDetails(s, data.me.section?.name)}
           photoUrl={s.photoFileId ? fileHref(s.photoFileId) : null}
           card={live ? { status: live.status, validUntil: live.validUntil } : null}
           brand={v.config.branding.primaryColor}

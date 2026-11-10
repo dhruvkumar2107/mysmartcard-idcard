@@ -36,6 +36,12 @@ export const institutions = pgTable("institutions", {
   shortName: text("short_name").notNull(),
   city: text("city"),
   contactEmail: text("contact_email"),
+  /** Printed on student ID cards. */
+  address: text("address"),
+  contactPhone: text("contact_phone"),
+  principalName: text("principal_name"),
+  /** A `files` row with owner_type "branding" (public), shown on the ID card. */
+  principalSignatureFileId: uuid("principal_signature_file_id"),
   status: text("status").notNull().default("active"), // active | suspended
   plan: text("plan").notNull().default("standard"), // starter | standard | enterprise
   /** Modules the platform subscription allows. The college can only enable a subset. */
@@ -274,6 +280,9 @@ export const students = pgTable(
     institutionId: tenant(),
     userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
     enrollmentNo: text("enrollment_no").notNull(),
+    /** University register number, when it differs from the college enrollment number. */
+    registerNo: text("register_no"),
+    rollNo: text("roll_no"),
     fullName: text("full_name").notNull(),
     email: text("email"),
     phone: text("phone"),
@@ -283,6 +292,9 @@ export const students = pgTable(
     guardianPhone: text("guardian_phone"),
     address: text("address"),
     bloodGroup: text("blood_group"),
+    classTeacher: text("class_teacher"),
+    /** Internship / placement details (company, role, period). */
+    internship: text("internship"),
     photoFileId: uuid("photo_file_id"),
     departmentId: uuid("department_id").references(() => departments.id, { onDelete: "set null" }),
     programmeId: uuid("programme_id").references(() => programmes.id, { onDelete: "set null" }),

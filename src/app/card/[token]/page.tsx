@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { Lock, ShieldCheck, ShieldX, UserRound } from "lucide-react";
-import { DigitalIdCard } from "@/components/views";
+import { DigitalIdCard, idCardCollege } from "@/components/views";
 import { LinkButton } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 import { PUBLIC_DETAIL_FIELDS, PUBLIC_FIELDS } from "@/lib/portal-config";
@@ -65,7 +65,7 @@ export default async function CardPage({ params }: { params: Promise<{ token: st
           <ShieldCheck className="h-4 w-4" aria-hidden /> Verified {view.institution.shortName} student ID
         </div>
         <DigitalIdCard
-          college={{ name: view.institution.name, logoUrl: view.branding.logoFileId ? `/api/files/${view.branding.logoFileId}` : null }}
+          college={idCardCollege({ ...view.institution, address: view.institution.collegeAddress }, view.branding.logoFileId)}
           student={{
             fullName: f.fullName ?? "Student",
             enrollmentNo: f.enrollmentNo ?? "••••••",

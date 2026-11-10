@@ -10,7 +10,7 @@ export const metadata = { title: "Import students" };
 export default async function ImportPage({ params, searchParams }: SlugProps) {
   const { slug } = await params;
   await requireTenant(slug, "students.import");
-  const template = `data:text/csv;charset=utf-8,${encodeURIComponent(IMPORT_COLUMNS.join(",") + "\nNITCSE25901,Asha Verma,asha@example.edu,+91 90000 00000,2006-04-12,Female,CSE,BTECH-CSE,3,A,2026-27,2025,R. Verma,+91 91111 11111,O+\n")}`;
+  const template = `data:text/csv;charset=utf-8,${encodeURIComponent(IMPORT_COLUMNS.join(",") + '\nNITCSE25901,U25CS0901,42,Asha Verma,asha@example.edu,+91 90000 00000,2006-04-12,Female,CSE,BTECH-CSE,3,A,2026-27,2025,R. Verma,+91 91111 11111,O+,"12 MG Road, Bengaluru",Dr. K. Rao,\n')}`;
   return (
     <>
       <PageHeader title="Import students" description="Upload a CSV or XLSX file. Validate first, then import." back={{ href: `/c/${slug}/admin/students`, label: "Students" }} />

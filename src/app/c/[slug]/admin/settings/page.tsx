@@ -1,4 +1,6 @@
-import { Alert, Card, Flash, KV, PageHeader, StatusBadge } from "@/components/ui";
+import { Alert, Card, Field, Flash, Input, KV, PageHeader, StatusBadge, Textarea, TenantFields } from "@/components/ui";
+import { SubmitButton } from "@/components/client";
+import { saveIdCardDetailsAction } from "@/server/actions/admin";
 import { MODULES } from "@/lib/portal-config";
 import { flashOf, type SlugProps } from "@/lib/page";
 import { requireTenant } from "@/server/session";
@@ -37,6 +39,41 @@ export default async function SettingsPage({ params, searchParams }: SlugProps) 
           </div>
         </Card>
       </div>
+      {ctx.perms.has("portal.configure") && (
+        <div className="mt-6">
+          <Card title="ID card details" description="Printed on every student ID card: college address, contact number and the principal's signature.">
+            <form action={saveIdCardDetailsAction} encType="multipart/form-data" className="grid gap-4 sm:grid-cols-2">
+              <TenantFields slug={slug} back={`/c/${slug}/admin/settings`} />
+              <Field label="College address" className="sm:col-span-2">
+                <Textarea name="address" rows={2} maxLength={300} defaultValue={i.address ?? ""} />
+              </Field>
+              <Field label="College contact number">
+                <Input name="contactPhone" type="tel" maxLength={30} defaultValue={i.contactPhone ?? ""} />
+              </Field>
+              <Field label="Principal name">
+                <Input name="principalName" maxLength={120} defaultValue={i.principalName ?? ""} />
+              </Field>
+              <Field label="Principal signature" hint="PNG with transparent background works best · max 2 MB" className="sm:col-span-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  {i.principalSignatureFileId && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={`/api/files/${i.principalSignatureFileId}`} alt="Current principal signature" className="h-12 max-w-[12rem] rounded border border-line bg-white object-contain p-1" />
+                  )}
+                  <Input type="file" name="signature" accept="image/png,image/jpeg,image/webp" />
+                  {i.principalSignatureFileId && (
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="removeSignature" /> Remove signature
+                    </label>
+                  )}
+                </div>
+              </Field>
+              <div className="flex justify-end sm:col-span-2">
+                <SubmitButton>Save ID card details</SubmitButton>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
       <div className="mt-6">
         <Alert tone="info">Data retention: archived student records are kept for audit purposes and can be restored from the Students page. Permanent deletion requests should be raised with platform support so backups are handled consistently.</Alert>
       </div>

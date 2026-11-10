@@ -30,8 +30,14 @@ export function StudentForm({
           <Field label="Official full name">
             <Input name="fullName" defaultValue={s.fullName ?? ""} required minLength={2} maxLength={120} />
           </Field>
-          <Field label="Enrollment / registration no." hint="Unique within your college">
+          <Field label="Enrollment no." hint="Unique within your college">
             <Input name="enrollmentNo" defaultValue={s.enrollmentNo ?? ""} required pattern="[A-Za-z0-9/_\-]+" maxLength={40} className="font-mono uppercase" />
+          </Field>
+          <Field label="Register number" hint="University register no., if different">
+            <Input name="registerNo" defaultValue={s.registerNo ?? ""} maxLength={40} className="font-mono uppercase" />
+          </Field>
+          <Field label="Roll number">
+            <Input name="rollNo" defaultValue={s.rollNo ?? ""} maxLength={20} />
           </Field>
           <Field label="Status">
             <Select name="status" defaultValue={s.status ?? "active"} options={STUDENT_STATUSES.map((x) => ({ value: x, label: x }))} />
@@ -69,6 +75,12 @@ export function StudentForm({
           <Field label="Admission year">
             <Input name="admissionYear" type="number" min={1990} max={2100} defaultValue={s.admissionYear ?? ""} />
           </Field>
+          <Field label="Class teacher">
+            <Input name="classTeacher" defaultValue={s.classTeacher ?? ""} maxLength={120} />
+          </Field>
+          <Field label="Internship / placement" hint="Company, role and period" className="sm:col-span-2">
+            <Input name="internship" defaultValue={s.internship ?? ""} maxLength={300} />
+          </Field>
         </div>
       </Card>
       <Card title="Contact" description={canSensitive ? undefined : "Some personal fields are restricted for your role and are not shown."}>
@@ -76,7 +88,7 @@ export function StudentForm({
           <Field label="Email" hint="Used for portal sign-in">
             <Input name="email" type="email" defaultValue={s.email ?? ""} />
           </Field>
-          <Field label="Phone">
+          <Field label="Contact number">
             <Input name="phone" type="tel" defaultValue={s.phone ?? ""} maxLength={20} />
           </Field>
           {canSensitive && (
@@ -84,13 +96,13 @@ export function StudentForm({
               <Field label="Date of birth">
                 <Input name="dateOfBirth" type="date" defaultValue={s.dateOfBirth ?? ""} />
               </Field>
-              <Field label="Guardian name">
+              <Field label="Parent / guardian full name">
                 <Input name="guardianName" defaultValue={s.guardianName ?? ""} />
               </Field>
-              <Field label="Guardian phone">
+              <Field label="Parent / guardian contact number">
                 <Input name="guardianPhone" type="tel" defaultValue={s.guardianPhone ?? ""} maxLength={20} />
               </Field>
-              <Field label="Address" className="sm:col-span-2 lg:col-span-3">
+              <Field label="Student address" className="sm:col-span-2 lg:col-span-3">
                 <Textarea name="address" rows={2} defaultValue={s.address ?? ""} maxLength={500} />
               </Field>
             </>

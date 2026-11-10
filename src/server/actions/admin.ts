@@ -82,6 +82,8 @@ export async function unassignClassAction(fd: FormData) {
 function studentFromForm(fd: FormData): students.StudentInput {
   return {
     enrollmentNo: str(fd, "enrollmentNo"),
+    registerNo: optStr(fd, "registerNo"),
+    rollNo: optStr(fd, "rollNo"),
     fullName: str(fd, "fullName"),
     email: optStr(fd, "email")?.toLowerCase() ?? null,
     phone: optStr(fd, "phone"),
@@ -91,6 +93,8 @@ function studentFromForm(fd: FormData): students.StudentInput {
     guardianPhone: optStr(fd, "guardianPhone"),
     address: optStr(fd, "address"),
     bloodGroup: optStr(fd, "bloodGroup"),
+    classTeacher: optStr(fd, "classTeacher"),
+    internship: optStr(fd, "internship"),
     departmentId: optStr(fd, "departmentId"),
     programmeId: optStr(fd, "programmeId"),
     sectionId: optStr(fd, "sectionId"),
@@ -596,6 +600,18 @@ export async function savePublicFieldsAction(fd: FormData) {
   return tenantAction(fd, async (ctx) => {
     await settings.savePublicFields(ctx, list(fd, "publicFields").filter((f) => PUBLIC_FIELDS.some((p) => p.key === f)));
     return "NFC tap-page fields saved. They apply immediately.";
+  });
+}
+export async function saveIdCardDetailsAction(fd: FormData) {
+  return tenantAction(fd, async (ctx) => {
+    const sig = fd.get("signature");
+    await settings.saveIdCardDetails(
+      ctx,
+      { address: optStr(fd, "address"), contactPhone: optStr(fd, "contactPhone"), principalName: optStr(fd, "principalName") },
+      sig instanceof File ? sig : null,
+      bool(fd, "removeSignature"),
+    );
+    return "ID card details saved.";
   });
 }
 export async function saveAcademicAction(fd: FormData) {

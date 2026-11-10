@@ -4,6 +4,8 @@ import { z } from "zod";
 /** Columns accepted in CSV/XLSX imports. Department/programme/section are referenced by code/name. */
 export const IMPORT_COLUMNS = [
   "enrollment_no",
+  "register_no",
+  "roll_no",
   "full_name",
   "email",
   "phone",
@@ -18,6 +20,9 @@ export const IMPORT_COLUMNS = [
   "guardian_name",
   "guardian_phone",
   "blood_group",
+  "address",
+  "class_teacher",
+  "internship",
 ] as const;
 
 const optionalText = z
@@ -29,6 +34,8 @@ const optionalText = z
 
 export const importRowSchema = z.object({
   enrollment_no: z.string().trim().min(1, "enrollment_no is required").max(40).regex(/^[A-Za-z0-9/_-]+$/, "enrollment_no has invalid characters"),
+  register_no: optionalText,
+  roll_no: optionalText,
   full_name: z.string().trim().min(2, "full_name is required").max(120),
   email: z
     .string()
@@ -54,6 +61,9 @@ export const importRowSchema = z.object({
   guardian_name: optionalText,
   guardian_phone: optionalText,
   blood_group: optionalText,
+  address: optionalText,
+  class_teacher: optionalText,
+  internship: optionalText,
 });
 export type ImportRow = z.infer<typeof importRowSchema>;
 

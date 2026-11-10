@@ -235,7 +235,7 @@ export type PublicCardView =
   | { state: "inactive"; institution: { name: string; slug: string } }
   | {
       state: "ok";
-      institution: { name: string; shortName: string; slug: string };
+      institution: { name: string; shortName: string; slug: string; collegeAddress: string | null; contactPhone: string | null; principalName: string | null; principalSignatureFileId: string | null };
       branding: { primaryColor: string; accentColor: string; logoFileId: string | null };
       fields: Record<string, string | null>;
       photoAvailable: boolean;
@@ -277,6 +277,10 @@ export async function resolveCardToken(token: string, opts: { countTap?: boolean
   const all: Record<string, string | null> = {
     fullName: s.student.fullName,
     enrollmentNo: s.student.enrollmentNo,
+    registerNo: s.student.registerNo,
+    rollNo: s.student.rollNo,
+    classTeacher: s.student.classTeacher,
+    internship: s.student.internship,
     department: s.departmentName,
     programme: s.programmeName,
     semester: String(s.student.semester),
@@ -297,7 +301,16 @@ export async function resolveCardToken(token: string, opts: { countTap?: boolean
   const fields = Object.fromEntries(Object.entries(all).filter(([k]) => allowed.has(k)));
   return {
     state: "ok",
-    institution: { name: row.institution.name, shortName: row.institution.shortName, slug: row.institution.slug },
+    institution: {
+      name: row.institution.name,
+      shortName: row.institution.shortName,
+      slug: row.institution.slug,
+      // College details printed on every card; not student data.
+      collegeAddress: row.institution.address,
+      contactPhone: row.institution.contactPhone,
+      principalName: row.institution.principalName,
+      principalSignatureFileId: row.institution.principalSignatureFileId,
+    },
     branding: { primaryColor: cfg.branding.primaryColor, accentColor: cfg.branding.accentColor, logoFileId: cfg.branding.logoFileId },
     fields,
     photoAvailable: allowed.has("photo") && !!s.student.photoFileId,

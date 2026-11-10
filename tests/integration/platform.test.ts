@@ -249,7 +249,18 @@ describe("NFC card lifecycle", () => {
     expect(view.state).toBe("ok");
     if (view.state !== "ok") return;
     expect(Object.keys(view.fields).sort()).toEqual(["cardValidity", "department", "enrollmentNo", "fullName", "programme", "status"].sort());
-    expect(JSON.stringify(view)).not.toMatch(/@northbridge\.test|guardian|address|\+91/i);
+    // College details (address, contact, principal) are public by design; student data must not leak.
+    const { institution: _college, ...studentView } = view;
+    void _college;
+    expect(JSON.stringify(studentView)).not.toMatch(/@northbridge\.test|guardian|address|\+91|registerNo|rollNo|internship/i);
+  });
+
+  it("prints college ID-card details (address, contact, principal) on the public card", async () => {
+    await settings.saveIdCardDetails(A, { address: "1 College Road, Bengaluru", contactPhone: "080 1234 5678", principalName: "Dr. P. Rao" });
+    A = await ctxFor("admin@northbridge.test", "northbridge");
+    const [c] = (await cards.listCards(A, { status: "active" })).filter((x) => x.card.studentId);
+    const view = await cards.resolveCardToken((await cards.liveTokenForCard(A, c.card.id))!.token, { countTap: false });
+    expect(view.state === "ok" && view.institution).toMatchObject({ collegeAddress: "1 College Road, Bengaluru", contactPhone: "080 1234 5678", principalName: "Dr. P. Rao" });
   });
 
   it("respects public-field configuration after publish", async () => {
@@ -269,7 +280,7 @@ describe("NFC card lifecycle", () => {
     if (view.state !== "ok") return;
     expect(Object.keys(view.fields).sort()).toEqual(["fullName", "guardianPhone", "section"]);
     expect(view.fields.section).toBeTruthy();
-    expect(JSON.stringify(view)).not.toMatch(/@northbridge\.test|address/i);
+    expect(JSON.stringify(view.fields)).not.toMatch(/@northbridge\.test|address/i);
     await settings.savePublicFields(A, ["fullName"]);
     A = await ctxFor("admin@northbridge.test", "northbridge");
   });

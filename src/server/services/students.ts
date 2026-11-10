@@ -47,7 +47,7 @@ export async function listStudents(ctx: TenantContext, query: StudentListQuery) 
   if (query.semester) conds.push(eq(students.semester, query.semester));
   if (query.q?.trim()) {
     const term = `%${query.q.trim().replace(/[%_]/g, "\\$&")}%`;
-    conds.push(or(ilike(students.fullName, term), ilike(students.enrollmentNo, term), ilike(students.email, term))!);
+    conds.push(or(ilike(students.fullName, term), ilike(students.enrollmentNo, term), ilike(students.registerNo, term), ilike(students.rollNo, term), ilike(students.email, term))!);
   }
   const where = and(...conds);
   const pageSize = Math.min(Math.max(query.pageSize ?? 25, 5), 200);
@@ -93,6 +93,8 @@ export async function getStudent(ctx: TenantContext, id: string) {
 
 const studentInput = z.object({
   enrollmentNo: z.string().trim().min(1).max(40).regex(/^[A-Za-z0-9/_-]+$/, "Enrollment number has invalid characters"),
+  registerNo: z.string().trim().max(40).nullable().optional(),
+  rollNo: z.string().trim().max(20).nullable().optional(),
   fullName: z.string().trim().min(2).max(120),
   email: z.email().nullable(),
   phone: z.string().trim().max(20).nullable(),
@@ -102,6 +104,8 @@ const studentInput = z.object({
   guardianPhone: z.string().max(20).nullable(),
   address: z.string().max(500).nullable(),
   bloodGroup: z.string().max(5).nullable(),
+  classTeacher: z.string().trim().max(120).nullable().optional(),
+  internship: z.string().trim().max(300).nullable().optional(),
   departmentId: z.string().nullable(),
   programmeId: z.string().nullable(),
   sectionId: z.string().nullable(),
@@ -232,6 +236,8 @@ export async function commitImport(ctx: TenantContext, raw: Record<string, strin
         resolved.map((r) => ({
           institutionId: ctx.institution.id,
           enrollmentNo: r.enrollment_no.toUpperCase(),
+          registerNo: r.register_no ?? null,
+          rollNo: r.roll_no ?? null,
           fullName: r.full_name,
           email: r.email ?? null,
           phone: r.phone ?? null,
@@ -240,6 +246,9 @@ export async function commitImport(ctx: TenantContext, raw: Record<string, strin
           guardianName: r.guardian_name ?? null,
           guardianPhone: r.guardian_phone ?? null,
           bloodGroup: r.blood_group ?? null,
+          address: r.address ?? null,
+          classTeacher: r.class_teacher ?? null,
+          internship: r.internship ?? null,
           departmentId: r.departmentId,
           programmeId: r.programmeId,
           sectionId: r.sectionId,
@@ -256,7 +265,7 @@ export async function commitImport(ctx: TenantContext, raw: Record<string, strin
   return { imported, issues, totalRows };
 }
 
-export const EXPORT_COLUMNS = ["enrollment_no", "full_name", "email", "phone", "department", "programme", "semester", "section", "academic_year", "status"];
+export const EXPORT_COLUMNS = ["enrollment_no", "register_no", "roll_no", "full_name", "email", "phone", "department", "programme", "semester", "section", "academic_year", "blood_group", "class_teacher", "internship", "status"];
 export const EXPORT_SENSITIVE_COLUMNS = ["date_of_birth", "guardian_name", "guardian_phone", "address"];
 
 export async function exportStudents(ctx: TenantContext, query: StudentListQuery) {
@@ -268,6 +277,8 @@ export async function exportStudents(ctx: TenantContext, query: StudentListQuery
     for (const r of res.rows)
       rows.push({
         enrollment_no: r.student.enrollmentNo,
+        register_no: r.student.registerNo,
+        roll_no: r.student.rollNo,
         full_name: r.student.fullName,
         email: r.student.email,
         phone: r.student.phone,
@@ -276,6 +287,9 @@ export async function exportStudents(ctx: TenantContext, query: StudentListQuery
         semester: r.student.semester,
         section: r.sectionName,
         academic_year: r.student.academicYear,
+        blood_group: r.student.bloodGroup,
+        class_teacher: r.student.classTeacher,
+        internship: r.student.internship,
         status: r.student.status,
         date_of_birth: r.student.dateOfBirth,
         guardian_name: r.student.guardianName,

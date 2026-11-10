@@ -3,7 +3,7 @@ import { Eye, Pencil } from "lucide-react";
 import { Alert, Card, EmptyState, Field, Flash, Input, KV, LinkButton, PageHeader, StatusBadge, Table, Tabs, Td, TenantFields, Th } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
 import { OneTimeCredential } from "@/components/server-bits";
-import { AttendanceView, CourseworkView, DigitalIdCard, FeesView, InternalMarksView, LibraryView, NoticesView, ResultsView, TimetableView, TransportView } from "@/components/views";
+import { AttendanceView, CourseworkView, DigitalIdCard, FeesView, idCardCollege, idCardDetails, InternalMarksView, LibraryView, NoticesView, ResultsView, TimetableView, TransportView } from "@/components/views";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { flashOf, one, type SlugProps } from "@/lib/page";
 import { orNotFound, requireTenant } from "@/server/session";
@@ -86,7 +86,13 @@ export default async function StudentProfile({ params, searchParams }: SlugProps
       {tab === "personal" && (
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="space-y-4">
-            <DigitalIdCard college={{ name: ctx.institution.name }} student={{ ...s, department: department?.name, programme: programme?.name }} photoUrl={photoUrl} brand={ctx.portalConfig.branding.primaryColor} />
+            <DigitalIdCard
+              college={idCardCollege(ctx.institution, ctx.portalConfig.branding.logoFileId)}
+              student={{ ...s, department: department?.name, programme: programme?.name }}
+              photoUrl={photoUrl}
+              brand={ctx.portalConfig.branding.primaryColor}
+              details={idCardDetails(s, section?.name)}
+            />
             {can("students.edit") && (
               <Card title="Update photograph">
                 <form action={uploadPhotoAction} encType="multipart/form-data" className="flex flex-col gap-3">
@@ -103,12 +109,16 @@ export default async function StudentProfile({ params, searchParams }: SlugProps
               <KV
                 items={[
                   ["Full name", s.fullName],
+                  ["Register number", s.registerNo],
+                  ["Roll number", s.rollNo],
+                  ["Class teacher", s.classTeacher],
+                  ["Internship / placement", s.internship],
                   ["Gender", s.gender],
                   ["Date of birth", can("students.view_sensitive") ? formatDate(s.dateOfBirth) : "Restricted"],
                   ["Blood group", s.bloodGroup],
                   ["Email", s.email],
-                  ["Phone", s.phone],
-                  ["Guardian", can("students.view_sensitive") ? s.guardianName : "Restricted"],
+                  ["Contact number", s.phone],
+                  ["Parent / guardian", can("students.view_sensitive") ? s.guardianName : "Restricted"],
                   ["Guardian phone", can("students.view_sensitive") ? s.guardianPhone : "Restricted"],
                   ["Address", can("students.view_sensitive") ? s.address : "Restricted"],
                 ]}
