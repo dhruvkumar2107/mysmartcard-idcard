@@ -7,7 +7,7 @@ import { badRequest, forbidden, notFound } from "@/lib/errors";
 import type { Role } from "@/lib/permissions";
 import { newStorageKey, storage, validateUpload } from "@/lib/storage";
 import { audit } from "../audit";
-import { assertAdminWrite, assertCan, type TenantContext } from "../context";
+import { assertAdminWrite, assertCan, CARD_VIEWER_USER, type TenantContext } from "../context";
 import { isUuid, owned } from "./guard";
 
 export const NOTICE_CATEGORIES = ["general", "department", "class", "exam", "holiday", "deadline", "event", "admin", "transport", "library"] as const;
@@ -326,6 +326,8 @@ async function liveFor(ctx: TenantContext, v: NoticeViewer, q?: string) {
 
 async function readMap(ctx: TenantContext, ids: string[]) {
   if (!ids.length) return new Map<string, number>();
+  // An NFC card link has no account to track reads for: show every notice as read.
+  if (ctx.user.id === CARD_VIEWER_USER.id) return new Map(ids.map((id) => [id, Number.MAX_SAFE_INTEGER]));
   const rows = await getDb().select({ noticeId: noticeReads.noticeId, revision: noticeReads.revision }).from(noticeReads).where(and(eq(noticeReads.userId, ctx.user.id), inArray(noticeReads.noticeId, ids)));
   return new Map(rows.map((r) => [r.noticeId, r.revision]));
 }

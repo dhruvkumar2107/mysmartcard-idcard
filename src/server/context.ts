@@ -52,18 +52,8 @@ export async function loadTenantContext(user: TenantContext["user"], slug: strin
   if (!inst) throw notFound("College");
   if (inst.status !== "active" && !user.isSuperAdmin) throw forbidden("This college workspace is currently suspended.");
 
-  const [settings] = await db.select().from(institutionSettings).where(eq(institutionSettings.institutionId, inst.id)).limit(1);
-  const overrides = (settings?.permissionOverrides ?? {}) as Record<string, Record<string, boolean>>;
-  const global = await loadGlobalPolicy();
-  const base = {
-    user: { id: user.id, name: user.name, email: user.email, isSuperAdmin: user.isSuperAdmin },
-    institution: inst,
-    // Students always get: college branding/restrictions + published global defaults + published college override.
-    portalConfig: applyPolicy(normalizeConfig(settings?.publishedConfig, inst.licensedModules), resolvePolicy(global.published, normalizePolicy(settings?.policyPublished)), inst.licensedModules),
-    draftConfig: applyPolicy(normalizeConfig(settings?.draftConfig, inst.licensedModules), resolvePolicy(global.published, normalizePolicy(settings?.policyDraft)), inst.licensedModules),
-    academic: normalizeAcademic(settings?.academic),
-    permissionOverrides: overrides,
-  };
+  const base = await baseContext(user, inst);
+  const overrides = base.permissionOverrides;
 
   const [m] = await db
     .select()
@@ -128,6 +118,43 @@ export async function loadTenantContext(user: TenantContext["user"], slug: strin
     classes,
     studentId,
     viaSupport: false,
+    viaPlatform: false,
+  };
+}
+
+async function baseContext(user: TenantContext["user"], inst: Institution) {
+  const [settings] = await getDb().select().from(institutionSettings).where(eq(institutionSettings.institutionId, inst.id)).limit(1);
+  const global = await loadGlobalPolicy();
+  return {
+    user: { id: user.id, name: user.name, email: user.email, isSuperAdmin: user.isSuperAdmin },
+    institution: inst,
+    // Students always get: college branding/restrictions + published global defaults + published college override.
+    portalConfig: applyPolicy(normalizeConfig(settings?.publishedConfig, inst.licensedModules), resolvePolicy(global.published, normalizePolicy(settings?.policyPublished)), inst.licensedModules),
+    draftConfig: applyPolicy(normalizeConfig(settings?.draftConfig, inst.licensedModules), resolvePolicy(global.published, normalizePolicy(settings?.policyDraft)), inst.licensedModules),
+    academic: normalizeAcademic(settings?.academic),
+    permissionOverrides: (settings?.permissionOverrides ?? {}) as Record<string, Record<string, boolean>>,
+  };
+}
+
+/** No account: reads made for an NFC card link use this placeholder user (it owns no rows). */
+export const CARD_VIEWER_USER = { id: "00000000-0000-0000-0000-000000000000", name: "NFC card viewer", email: "", isSuperAdmin: false } as const;
+
+/**
+ * Read-only student context for an NFC card link. The live card token is the credential;
+ * the context has the student role and no permissions, and callers must only read with it.
+ */
+export async function cardTenantContext(inst: Institution, studentId: string): Promise<TenantContext> {
+  const base = await baseContext(CARD_VIEWER_USER, inst);
+  return {
+    ...base,
+    role: "student",
+    departmentId: null,
+    perms: new Set(),
+    scope: scopeForRole("student", null),
+    facultyId: null,
+    classes: [],
+    studentId,
+    viaSupport: true, // assertWritable() refuses every write made with this context
     viaPlatform: false,
   };
 }

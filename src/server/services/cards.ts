@@ -346,6 +346,7 @@ export type PublicCardView =
       fields: Record<string, string | null>;
       photoAvailable: boolean;
       studentId: string;
+      institutionId: string;
       cardStatus: string;
     };
 
@@ -424,6 +425,7 @@ export async function resolveCardToken(token: string, opts: { countTap?: boolean
     fields,
     photoAvailable: allowed.has("photo") && !!s.student.photoFileId,
     studentId: s.student.id,
+    institutionId: row.institution.id,
     cardStatus: row.card.status,
   };
 }

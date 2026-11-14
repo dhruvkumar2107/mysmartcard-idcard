@@ -10,13 +10,16 @@ import { AppError } from "@/lib/errors";
 import { loadTenantContext } from "@/server/context";
 import { getSessionUser } from "@/server/session";
 import { resolveCardToken } from "@/server/services/cards";
+import { cardPortalSignInEnabled } from "@/server/services/portal-builder";
+import { viewerForCard } from "@/server/services/portal";
+import { PortalHome, PortalShell } from "@/components/portal";
 
 export const metadata: Metadata = { title: "Student ID", robots: { index: false, follow: false }, referrer: "no-referrer" };
 
 /**
- * Public NFC landing page. Shows ONLY the fields the college marked public.
- * Tapping a card is treated as "find this student's portal", never as
- * authentication; private records sit behind sign-in.
+ * NFC landing page. Holding a live card link shows the student's ID and their published
+ * portal sections, strictly view only (no forms, no sign-in needed). The "sign in to the
+ * student portal" prompt appears only when the super admin turns it on.
  */
 export default async function CardPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -57,60 +60,66 @@ export default async function CardPage({ params }: { params: Promise<{ token: st
     const label = PUBLIC_FIELDS.find((p) => p.key === key)!.label;
     return [[label, key === "dateOfBirth" ? formatDate(value) : value]];
   });
-  const viewer = await viewerRole(view.institution.slug, view.studentId);
+  const [viewer, signInEnabled, v] = await Promise.all([viewerRole(view.institution.slug, view.studentId), cardPortalSignInEnabled(), viewerForCard(token, view.studentId, view.institutionId)]);
+  const base = `/card/${token}`;
   return (
-    <main className="min-h-screen bg-bg px-4 py-8" style={{ ["--brand" as string]: view.branding.primaryColor, ["--accent" as string]: view.branding.accentColor }}>
-      <div className="mx-auto max-w-sm">
-        <div className="mb-4 flex items-center justify-center gap-1.5 text-sm font-medium text-ok">
-          <ShieldCheck className="h-4 w-4" aria-hidden /> Verified {view.institution.shortName} student ID
-        </div>
-        <DigitalIdCard
-          college={idCardCollege({ ...view.institution, address: view.institution.collegeAddress }, view.branding.logoFileId)}
-          student={{
-            fullName: f.fullName ?? "Student",
-            enrollmentNo: f.enrollmentNo ?? "••••••",
-            department: f.department,
-            programme: f.programme,
-            semester: f.semester,
-            academicYear: f.academicYear,
-            status: f.status ?? "active",
-            bloodGroup: f.bloodGroup,
-          }}
-          photoUrl={view.photoAvailable ? `/card/${token}/photo` : null}
-          card={"cardValidity" in f ? { status: view.cardStatus, validUntil: f.cardValidity } : null}
-          brand={view.branding.primaryColor}
-          details={details}
-        />
-        <div className="mt-6 rounded-xl border border-line bg-surface p-4 text-center">
+    <PortalShell v={v} base={base} active="home">
+      <div className="space-y-8">
+        <section className="mx-auto max-w-sm">
+          <div className="mb-4 flex items-center justify-center gap-1.5 text-sm font-medium text-ok">
+            <ShieldCheck className="h-4 w-4" aria-hidden /> Verified {view.institution.shortName} student ID
+          </div>
+          <DigitalIdCard
+            college={idCardCollege({ ...view.institution, address: view.institution.collegeAddress }, view.branding.logoFileId)}
+            student={{
+              fullName: f.fullName ?? "Student",
+              enrollmentNo: f.enrollmentNo ?? "••••••",
+              department: f.department,
+              programme: f.programme,
+              semester: f.semester,
+              academicYear: f.academicYear,
+              status: f.status ?? "active",
+              bloodGroup: f.bloodGroup,
+            }}
+            photoUrl={view.photoAvailable ? `${base}/photo` : null}
+            card={"cardValidity" in f ? { status: view.cardStatus, validUntil: f.cardValidity } : null}
+            brand={view.branding.primaryColor}
+            details={details}
+          />
           {viewer === "staff" ? (
-            <>
+            <div className="mt-6 rounded-xl border border-line bg-surface p-4 text-center">
               <UserRound className="mx-auto h-5 w-5 text-muted" aria-hidden />
               <p className="mt-2 text-sm">You are signed in as {view.institution.shortName} staff.</p>
               <LinkButton href={`/c/${view.institution.slug}/admin/students/${view.studentId}`} variant="primary" className="mt-3 w-full">
                 View full student record
               </LinkButton>
-            </>
-          ) : viewer === "owner" ? (
-            <>
-              <UserRound className="mx-auto h-5 w-5 text-muted" aria-hidden />
-              <p className="mt-2 text-sm">This is your card. Your attendance, results, fees and more are in your portal.</p>
-              <LinkButton href={`/c/${view.institution.slug}/portal`} variant="primary" className="mt-3 w-full">
-                Open my student portal
-              </LinkButton>
-            </>
-          ) : (
-            <>
-              <Lock className="mx-auto h-5 w-5 text-muted" aria-hidden />
-              <p className="mt-2 text-sm">Is this your card? Sign in to view attendance, results, fees and more.</p>
-              <LinkButton href={`/login?next=${encodeURIComponent(`/c/${view.institution.slug}/portal`)}`} variant="primary" className="mt-3 w-full">
-                Open my student portal
-              </LinkButton>
-            </>
-          )}
-        </div>
-        <p className="mt-4 text-center text-xs text-muted">Verified {formatDate(new Date(), { dateStyle: "medium", timeStyle: "short" })} · MySmartCard Campus</p>
+            </div>
+          ) : signInEnabled ? (
+            <div className="mt-6 rounded-xl border border-line bg-surface p-4 text-center">
+              {viewer === "owner" ? (
+                <>
+                  <UserRound className="mx-auto h-5 w-5 text-muted" aria-hidden />
+                  <p className="mt-2 text-sm">This is your card. Your attendance, results, fees and more are in your portal.</p>
+                  <LinkButton href={`/c/${view.institution.slug}/portal`} variant="primary" className="mt-3 w-full">
+                    Open my student portal
+                  </LinkButton>
+                </>
+              ) : (
+                <>
+                  <Lock className="mx-auto h-5 w-5 text-muted" aria-hidden />
+                  <p className="mt-2 text-sm">Is this your card? Sign in to your student portal.</p>
+                  <LinkButton href={`/login?next=${encodeURIComponent(`/c/${view.institution.slug}/portal`)}`} variant="primary" className="mt-3 w-full">
+                    Open my student portal
+                  </LinkButton>
+                </>
+              )}
+            </div>
+          ) : null}
+          <p className="mt-4 text-center text-xs text-muted">Verified {formatDate(new Date(), { dateStyle: "medium", timeStyle: "short" })} · MySmartCard Campus · View only</p>
+        </section>
+        <PortalHome v={v} base={base} hideIdCard />
       </div>
-    </main>
+    </PortalShell>
   );
 }
 

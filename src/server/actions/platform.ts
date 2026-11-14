@@ -142,3 +142,11 @@ export async function enterWorkspaceAction(fd: FormData) {
     return { to: `/c/${inst.slug}/admin` };
   });
 }
+
+export async function setCardPortalSignInAction(fd: FormData) {
+  return userAction(fd, "/platform", async (user) => {
+    const on = str(fd, "enabled") === "1";
+    await builder.setCardPortalSignIn(user, on);
+    return on ? "NFC card pages now show the student-portal sign-in button." : "NFC card pages no longer show the student-portal sign-in button.";
+  });
+}

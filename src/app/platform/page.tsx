@@ -5,12 +5,15 @@ import { Badge, Card, Flash, LinkButton, PageHeader, Stat, StatusBadge, Table, T
 import { flashOf, type Props } from "@/lib/page";
 import { requireSuperAdmin } from "@/server/session";
 import { listInstitutions, platformStats } from "@/server/services/platform";
+import { cardPortalSignInEnabled } from "@/server/services/portal-builder";
+import { setCardPortalSignInAction } from "@/server/actions/platform";
+import { SubmitButton } from "@/components/client";
 
 export const metadata = { title: "Platform" };
 
 export default async function PlatformHome({ searchParams }: Props) {
   const user = await requireSuperAdmin();
-  const [stats, rows] = await Promise.all([platformStats(user), listInstitutions(user)]);
+  const [stats, rows, cardSignIn] = await Promise.all([platformStats(user), listInstitutions(user), cardPortalSignInEnabled()]);
   return (
     <>
       <PageHeader
@@ -35,6 +38,22 @@ export default async function PlatformHome({ searchParams }: Props) {
           hint={`DB ${stats.dbOk ? "up" : "down"} · ${stats.storage.backend} ${stats.storage.ok ? "up" : `down${stats.storage.error ? ` (${stats.storage.error})` : ""}`}`}
         />
       </div>
+      <Card
+        className="mt-6"
+        title="NFC card link"
+        description="Tapping a student's card opens their ID and full student record, view only. Optionally, the page can also offer a button to sign in to the student portal."
+        actions={
+          <form action={setCardPortalSignInAction}>
+            <input type="hidden" name="_back" value="/platform" />
+            <input type="hidden" name="enabled" value={cardSignIn ? "0" : "1"} />
+            <SubmitButton variant={cardSignIn ? "secondary" : "primary"}>{cardSignIn ? "Turn off portal sign-in" : "Turn on portal sign-in"}</SubmitButton>
+          </form>
+        }
+      >
+        <p className="text-sm">
+          Student-portal sign-in on card pages: <Badge tone={cardSignIn ? "green" : "gray"}>{cardSignIn ? "On" : "Off"}</Badge>
+        </p>
+      </Card>
       <Card className="mt-6" padded={false}>
         <Table>
           <thead>

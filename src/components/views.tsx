@@ -598,7 +598,7 @@ export function CourseworkView({ items, fileHref, submitSlot }: { items: A<typeo
 
 // ---------------------------------------------------------------- Fees
 
-export function FeesView({ ledger, receiptHref, showDue }: { ledger: A<typeof studentLedger>; receiptHref: (id: string) => string; showDue: boolean }) {
+export function FeesView({ ledger, receiptHref, showDue }: { ledger: A<typeof studentLedger>; receiptHref?: (id: string) => string; showDue: boolean }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-3 gap-3">
@@ -673,9 +673,11 @@ export function FeesView({ ledger, receiptHref, showDue }: { ledger: A<typeof st
                   <Td>{titleCase(p.method)}</Td>
                   <Td className="tabular-nums">{formatMoney(p.amount)}</Td>
                   <Td>
-                    <a href={receiptHref(p.id)} className="text-sm font-medium text-brand hover:underline">
-                      Receipt
-                    </a>
+                    {receiptHref && (
+                      <a href={receiptHref(p.id)} className="text-sm font-medium text-brand hover:underline">
+                        Receipt
+                      </a>
+                    )}
                   </Td>
                 </tr>
               ))}

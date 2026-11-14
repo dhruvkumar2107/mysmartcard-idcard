@@ -1,10 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { departments, programmes, sections, students } from "@/db/schema";
+import { departments, institutions, programmes, sections, students } from "@/db/schema";
 import { forbidden } from "@/lib/errors";
 import { feature, moduleVisibleToStudent, orderedModules, type ModuleKey, type PortalConfig } from "@/lib/portal-config";
 import { audit } from "../audit";
-import type { TenantContext } from "../context";
+import { cardTenantContext, type TenantContext } from "../context";
 import { studentAttendance } from "./attendance";
 import { examSchedule, publishedResultsForStudent } from "./assessments";
 import { cardsForStudent } from "./cards";
@@ -24,7 +24,25 @@ import { owned } from "./guard";
  * same feature-flag stripping, so a hidden module or value is unreachable — not
  * merely hidden in the UI.
  */
-export type PortalViewer = { ctx: TenantContext; studentId: string; config: PortalConfig; preview: boolean };
+export type PortalViewer = {
+  ctx: TenantContext;
+  studentId: string;
+  config: PortalConfig;
+  preview: boolean;
+  /** Set when the portal is opened from an NFC card link: view only, files served through the card. */
+  card?: { token: string };
+};
+
+/** True when the viewer may only look: previews and NFC card links never get forms or "mark read". */
+export const isReadOnly = (v: PortalViewer) => v.preview || !!v.card;
+
+/** Whoever holds a live card link sees that student's published portal, read-only (no account needed). */
+export async function viewerForCard(token: string, studentId: string, institutionId: string): Promise<PortalViewer> {
+  const [inst] = await getDb().select().from(institutions).where(eq(institutions.id, institutionId)).limit(1);
+  if (!inst) throw forbidden();
+  const ctx = await cardTenantContext(inst, studentId);
+  return { ctx, studentId, config: ctx.portalConfig, preview: false, card: { token } };
+}
 
 export async function viewerForStudent(ctx: TenantContext): Promise<PortalViewer> {
   if (ctx.role !== "student" || !ctx.studentId) throw forbidden("The student portal is for student accounts.");

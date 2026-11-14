@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { ArrowRight, BookOpen, Bus, CalendarClock, ChevronLeft, ClipboardCheck, CreditCard, FileText, Home, Library, Megaphone, NotebookPen, Wallet, type LucideIcon } from "lucide-react";
 import { MODULES, feature, type ModuleKey } from "@/lib/portal-config";
 import { formatDate, formatMoney, initials } from "@/lib/format";
-import { loadModule, portalHome, visibleModules, portalStudent, type PortalViewer } from "@/server/services/portal";
+import { isReadOnly, loadModule, portalHome, visibleModules, portalStudent, type PortalViewer } from "@/server/services/portal";
 import { noticeForViewer } from "@/server/services/notices";
 import { AttendanceView, CourseworkView, DigitalIdCard, FeesView, idCardCollege, idCardDetails, InternalMarksView, LibraryView, NoticeCard, NoticeDetail, NoticesView, ResultsView, TimetableView, TransportView } from "./views";
 import { Badge, EmptyState, Input, LinkButton, Meter, cn } from "./ui";
@@ -38,15 +38,17 @@ const SLUG_OF: Record<ModuleKey, string> = {
 export const moduleFromSlug = (s: string) => (Object.entries(SLUG_OF).find(([, v]) => v === s)?.[0] as ModuleKey | undefined) ?? null;
 export const moduleHref = (base: string, k: ModuleKey) => `${base}/${SLUG_OF[k]}`;
 const label = (k: ModuleKey) => MODULES.find((m) => m.key === k)!.label;
-const fileHref = (id: string) => `/api/files/${id}`;
+/** Card-link viewers have no session, so their files are served through the card token. */
+const fileHrefFor = (v: PortalViewer) => (v.card ? (id: string) => `/card/${v.card!.token}/files/${id}` : (id: string) => `/api/files/${id}`);
 
 export async function PortalShell({ v, base, active, children, topRight }: { v: PortalViewer; base: string; active: ModuleKey | "home"; children: ReactNode; topRight?: ReactNode }) {
+  const fileHref = fileHrefFor(v);
   const me = await portalStudent(v);
   const mods = visibleModules(v, me.student);
   const b = v.config.branding;
   const s = me.student;
   const bottom = mods.filter((k) => k !== "digital_id").slice(0, 4);
-  const showBell = !v.preview && mods.includes("notices");
+  const showBell = !isReadOnly(v) && mods.includes("notices");
   return (
     <div style={{ ["--brand" as string]: b.primaryColor, ["--accent" as string]: b.accentColor }} className="min-h-screen bg-bg pb-24 md:pb-10">
       {v.preview && <div className="sticky top-0 z-40 bg-amber-400 px-4 py-1.5 text-center text-xs font-medium text-amber-950">Preview — this is exactly what {s.fullName} sees with the configuration being previewed.</div>}
@@ -133,7 +135,8 @@ function BottomLink({ href, on, icon: Icon, children }: { href: string; on: bool
   );
 }
 
-export async function PortalHome({ v, base }: { v: PortalViewer; base: string }) {
+export async function PortalHome({ v, base, hideIdCard }: { v: PortalViewer; base: string; /** The page already shows the ID card above. */ hideIdCard?: boolean }) {
+  const fileHref = fileHrefFor(v);
   const h = await portalHome(v);
   const s = h.me.student;
   const has = (k: ModuleKey) => h.modules.includes(k);
@@ -152,8 +155,8 @@ export async function PortalHome({ v, base }: { v: PortalViewer; base: string })
     <div className="space-y-8">
       {v.config.branding.welcomeMessage && <p className="text-sm text-muted">{v.config.branding.welcomeMessage}</p>}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,24rem)_1fr]">
-        {has("digital_id") && (
+      <div className={cn("grid gap-6", !hideIdCard && "lg:grid-cols-[minmax(0,24rem)_1fr]")}>
+        {has("digital_id") && !hideIdCard && (
           <section aria-labelledby="id-h">
             <h2 id="id-h" className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
               Digital student ID
@@ -254,6 +257,7 @@ function Tile({ href, label, children }: { href: string; label: string; children
 }
 
 export async function PortalModule({ v, k, q, page, base, submitAction }: { v: PortalViewer; k: ModuleKey; q?: string; page?: number; base: string; submitAction?: (fd: FormData) => Promise<void> }) {
+  const fileHref = fileHrefFor(v);
   const data = await loadModule(v, k, { q, page });
   const slug = v.ctx.institution.slug;
   let body: ReactNode = null;
@@ -323,7 +327,7 @@ export async function PortalModule({ v, k, q, page, base, submitAction }: { v: P
           items={data.items}
           fileHref={fileHref}
           submitSlot={(i) =>
-            submitAction && !v.preview && i.item.acceptSubmissions && i.submission?.grade == null && (!i.item.dueAt || i.item.dueAt > new Date()) ? (
+            submitAction && !isReadOnly(v) && i.item.acceptSubmissions && i.submission?.grade == null && (!i.item.dueAt || i.item.dueAt > new Date()) ? (
               <form action={submitAction} encType="multipart/form-data" className="mt-3 flex flex-col gap-2 rounded-lg border border-dashed border-line p-3 sm:flex-row sm:items-center">
                 <input type="hidden" name="_slug" value={slug} />
                 <input type="hidden" name="_back" value={`/c/${slug}/portal/assignments`} />
@@ -338,7 +342,7 @@ export async function PortalModule({ v, k, q, page, base, submitAction }: { v: P
       );
       break;
     case "fees":
-      body = <FeesView ledger={data.ledger} receiptHref={(id) => `/c/${slug}/receipt/${id}`} showDue={feature(v.config, "showFeeDueReminders")} />;
+      body = <FeesView ledger={data.ledger} receiptHref={v.card ? undefined : (id) => `/c/${slug}/receipt/${id}`} showDue={feature(v.config, "showFeeDueReminders")} />;
       break;
     case "library":
       body = (
@@ -373,6 +377,7 @@ export async function PortalModule({ v, k, q, page, base, submitAction }: { v: P
 
 /** One notice, opened from the feed or the bell. Opening it marks only this notice as read. */
 export async function PortalNotice({ v, base, id }: { v: PortalViewer; base: string; id: string }) {
+  const fileHref = fileHrefFor(v);
   const me = await portalStudent(v);
   const n = await noticeForViewer(v.ctx, { kind: "student", student: me.student }, id);
   return (
@@ -381,7 +386,7 @@ export async function PortalNotice({ v, base, id }: { v: PortalViewer; base: str
         <ChevronLeft className="h-4 w-4" aria-hidden /> All notices
       </Link>
       <NoticeDetail n={n} fileHref={fileHref} />
-      {!v.preview && <MarkNoticeRead slug={v.ctx.institution.slug} id={n.id} unread={n.unread} />}
+      {!isReadOnly(v) && <MarkNoticeRead slug={v.ctx.institution.slug} id={n.id} unread={n.unread} />}
     </div>
   );
 }

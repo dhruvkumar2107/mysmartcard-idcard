@@ -274,3 +274,21 @@ export async function overrideCounts(actor: Actor) {
   return counts;
 }
 
+
+// ---------------------------------------------------------------- NFC card link
+
+const CARD_SIGN_IN_KEY = "card_link.portal_sign_in";
+
+/** Whether the NFC card page offers "Sign in to your student portal". Off unless the super admin turns it on. */
+export async function cardPortalSignInEnabled() {
+  const [row] = await getDb().select({ value: platformSettings.value }).from(platformSettings).where(eq(platformSettings.key, CARD_SIGN_IN_KEY)).limit(1);
+  return row?.value === true;
+}
+
+export async function setCardPortalSignIn(actor: Actor, enabled: boolean) {
+  assertSuper(actor);
+  await getDb().transaction(async (tx) => {
+    await setPlatformSetting(CARD_SIGN_IN_KEY, enabled, actor, tx);
+    await platformAudit(actor, { action: "card_link.portal_sign_in", entityType: "platform_setting", summary: `${enabled ? "Enabled" : "Disabled"} the student-portal sign-in button on NFC card pages` }, tx);
+  });
+}
